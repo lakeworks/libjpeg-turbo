@@ -72,6 +72,25 @@ EXTN(jpeg_simd_cpu_support):
 
     or          rdi, JSIMD_AVX2
 
+    ; Check for AVX-512F and AVX-512BW instruction support
+    ; (CPUID leaf 7 was already called above; reload)
+    mov         rax, 7
+    xor         rcx, rcx
+    cpuid
+    test        rbx, 1 << 16            ; bit16:AVX-512F
+    jz          short .return
+    test        rbx, 1 << 30            ; bit30:AVX-512BW
+    jz          short .return
+
+    ; Check for AVX-512 O/S support (opmask + ZMM state)
+    xor         rcx, rcx
+    xgetbv
+    and         rax, 0xE0               ; bits 5,6,7
+    cmp         rax, 0xE0               ; O/S manages opmask/ZMM_Hi256/Hi16_ZMM
+    jnz         short .return
+
+    or          rdi, JSIMD_AVX512
+
 .return:
     mov         rax, rdi
 
