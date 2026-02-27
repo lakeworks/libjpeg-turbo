@@ -136,6 +136,23 @@ if(CPU_TYPE STREQUAL "x86_64")
     x86_64/jccolor-avx2.asm x86_64/jcgray-avx2.asm x86_64/jcsample-avx2.asm
     x86_64/jdcolor-avx2.asm x86_64/jdmerge-avx2.asm x86_64/jdsample-avx2.asm
     x86_64/jfdctint-avx2.asm x86_64/jidctint-avx2.asm x86_64/jquanti-avx2.asm)
+
+  # AVX-512 implementations (C intrinsics)
+  set(AVX512_SOURCES
+    x86_64/jccolor-avx512.c x86_64/jdcolor-avx512.c x86_64/jdmerge-avx512.c
+    x86_64/jfdctint-avx512.c x86_64/jidctint-avx512.c
+    x86_64/jquanti-avx512.c x86_64/jcsample-avx512.c
+    x86_64/jdsample-avx512.c)
+
+  if(MSVC)
+    set_source_files_properties(${AVX512_SOURCES} PROPERTIES
+      COMPILE_FLAGS "/arch:AVX512")
+  else()
+    set_source_files_properties(${AVX512_SOURCES} PROPERTIES
+      COMPILE_FLAGS "-mavx512bw -mavx512vl -mavx512vbmi")
+  endif()
+
+  list(APPEND SIMD_SOURCES ${AVX512_SOURCES})
 else()
   set(SIMD_SOURCES i386/jsimdcpu.asm i386/jfdctflt-3dn.asm
     i386/jidctflt-3dn.asm i386/jquant-3dn.asm
