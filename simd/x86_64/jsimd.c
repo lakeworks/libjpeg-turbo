@@ -55,7 +55,7 @@ init_simd(void)
   if (!GETENV_S(env, 2, "JSIMD_FORCEAVX2") && !strcmp(env, "1"))
     simd_support &= JSIMD_AVX2;
   if (!GETENV_S(env, 2, "JSIMD_FORCEAVX512") && !strcmp(env, "1"))
-    simd_support &= JSIMD_AVX512;
+    simd_support &= JSIMD_AVX512 | JSIMD_AVX2 | JSIMD_SSE2;
   if (!GETENV_S(env, 2, "JSIMD_FORCENONE") && !strcmp(env, "1"))
     simd_support = 0;
   if (!GETENV_S(env, 2, "JSIMD_NOHUFFENC") && !strcmp(env, "1"))
@@ -101,8 +101,6 @@ jsimd_can_rgb_gray(void)
   if ((RGB_PIXELSIZE != 3) && (RGB_PIXELSIZE != 4))
     return 0;
 
-  if (simd_support & JSIMD_AVX512)
-    return 1;
   if ((simd_support & JSIMD_AVX2) &&
       IS_ALIGNED_AVX(jconst_rgb_gray_convert_avx2))
     return 1;
@@ -211,58 +209,50 @@ jsimd_rgb_gray_convert(j_compress_ptr cinfo, JSAMPARRAY input_buf,
                        JSAMPIMAGE output_buf, JDIMENSION output_row,
                        int num_rows)
 {
-  void (*avx512fct) (JDIMENSION, JSAMPARRAY, JSAMPIMAGE, JDIMENSION, int);
   void (*avx2fct) (JDIMENSION, JSAMPARRAY, JSAMPIMAGE, JDIMENSION, int);
   void (*sse2fct) (JDIMENSION, JSAMPARRAY, JSAMPIMAGE, JDIMENSION, int);
 
   if (simd_support == ~0U)
     init_simd();
 
+  /* No AVX-512 implementation yet — fall through to AVX2/SSE2 */
+
   switch (cinfo->in_color_space) {
   case JCS_EXT_RGB:
-    avx512fct = jsimd_extrgb_gray_convert_avx512;
     avx2fct = jsimd_extrgb_gray_convert_avx2;
     sse2fct = jsimd_extrgb_gray_convert_sse2;
     break;
   case JCS_EXT_RGBX:
   case JCS_EXT_RGBA:
-    avx512fct = jsimd_extrgbx_gray_convert_avx512;
     avx2fct = jsimd_extrgbx_gray_convert_avx2;
     sse2fct = jsimd_extrgbx_gray_convert_sse2;
     break;
   case JCS_EXT_BGR:
-    avx512fct = jsimd_extbgr_gray_convert_avx512;
     avx2fct = jsimd_extbgr_gray_convert_avx2;
     sse2fct = jsimd_extbgr_gray_convert_sse2;
     break;
   case JCS_EXT_BGRX:
   case JCS_EXT_BGRA:
-    avx512fct = jsimd_extbgrx_gray_convert_avx512;
     avx2fct = jsimd_extbgrx_gray_convert_avx2;
     sse2fct = jsimd_extbgrx_gray_convert_sse2;
     break;
   case JCS_EXT_XBGR:
   case JCS_EXT_ABGR:
-    avx512fct = jsimd_extxbgr_gray_convert_avx512;
     avx2fct = jsimd_extxbgr_gray_convert_avx2;
     sse2fct = jsimd_extxbgr_gray_convert_sse2;
     break;
   case JCS_EXT_XRGB:
   case JCS_EXT_ARGB:
-    avx512fct = jsimd_extxrgb_gray_convert_avx512;
     avx2fct = jsimd_extxrgb_gray_convert_avx2;
     sse2fct = jsimd_extxrgb_gray_convert_sse2;
     break;
   default:
-    avx512fct = jsimd_rgb_gray_convert_avx512;
     avx2fct = jsimd_rgb_gray_convert_avx2;
     sse2fct = jsimd_rgb_gray_convert_sse2;
     break;
   }
 
-  if (simd_support & JSIMD_AVX512)
-    avx512fct(cinfo->image_width, input_buf, output_buf, output_row, num_rows);
-  else if (simd_support & JSIMD_AVX2)
+  if (simd_support & JSIMD_AVX2)
     avx2fct(cinfo->image_width, input_buf, output_buf, output_row, num_rows);
   else
     sse2fct(cinfo->image_width, input_buf, output_buf, output_row, num_rows);

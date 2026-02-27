@@ -248,14 +248,14 @@ FUNC_NAME(JDIMENSION img_width, JSAMPARRAY input_buf,                     \
        *   lane_i = {even[0..3], odd[0..3]} as 16-bit words              \
        * which is correct pixel order (0..7) within each lane.            \
        *                                                                  \
-       * Use VPMOVWB (_mm512_cvtepi16_epi8) to truncate 32 words to      \
-       * 32 bytes in a __m256i. Since values are in [0..255],             \
-       * truncation (keeping low byte) is equivalent to saturation.       \
+       * Use VPMOVUSWB (_mm512_cvtusepi16_epi8) to narrow 32 words to    \
+       * 32 bytes in a __m256i with unsigned saturation to [0..255].      \
+       * This safely handles edge-case rounding (e.g. Cb/Cr = 256).      \
        * The output preserves the per-lane ordering of the input.         \
        */                                                                 \
-      __m256i y_out  = _mm512_cvtepi16_epi8(y_words);                    \
-      __m256i cb_out = _mm512_cvtepi16_epi8(cb_words);                   \
-      __m256i cr_out = _mm512_cvtepi16_epi8(cr_words);                   \
+      __m256i y_out  = _mm512_cvtusepi16_epi8(y_words);                   \
+      __m256i cb_out = _mm512_cvtusepi16_epi8(cb_words);                 \
+      __m256i cr_out = _mm512_cvtusepi16_epi8(cr_words);                   \
                                                                           \
       /* Store Y, Cb, Cr to their respective output planes. */            \
       if (!is_tail) {                                                     \
