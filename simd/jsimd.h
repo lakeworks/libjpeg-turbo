@@ -27,6 +27,9 @@
 #define JSIMD_MMI      0x100
 #define JSIMD_AVX512   0x200
 
+/* Need c_derived_tbl and UJCOEF for Huffman function declarations below */
+#include "../src/jchuff.h"
+
 /* SIMD Ext: retrieve SIMD/CPU information */
 EXTERN(unsigned int) jpeg_simd_cpu_support(void);
 
