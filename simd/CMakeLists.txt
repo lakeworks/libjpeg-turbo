@@ -184,17 +184,17 @@ file(GLOB INC_FILES nasm/*.inc)
 
 foreach(file ${SIMD_SOURCES})
   set(OBJECT_DEPENDS "")
-  if(${file} MATCHES jccolor)
+  if(${file} MATCHES jccolor AND NOT ${file} MATCHES "avx512")
     string(REGEX REPLACE "jccolor" "jccolext" DEPFILE ${file})
     set(OBJECT_DEPENDS ${OBJECT_DEPENDS}
       ${CMAKE_CURRENT_SOURCE_DIR}/${DEPFILE})
   endif()
-  if(${file} MATCHES jcgray)
+  if(${file} MATCHES jcgray AND NOT ${file} MATCHES "avx512")
     string(REGEX REPLACE "jcgray" "jcgryext" DEPFILE ${file})
     set(OBJECT_DEPENDS ${OBJECT_DEPENDS}
       ${CMAKE_CURRENT_SOURCE_DIR}/${DEPFILE})
   endif()
-  if(${file} MATCHES jdcolor)
+  if(${file} MATCHES jdcolor AND NOT ${file} MATCHES "avx512")
     string(REGEX REPLACE "jdcolor" "jdcolext" DEPFILE ${file})
     set(OBJECT_DEPENDS ${OBJECT_DEPENDS}
       ${CMAKE_CURRENT_SOURCE_DIR}/${DEPFILE})
