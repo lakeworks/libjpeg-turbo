@@ -31,6 +31,7 @@
  *   _mm512_permutex2var_epi8 (VPERMI2B) - byte-granularity shuffle from 2 srcs
  */
 
+#define JPEG_INTERNALS
 #include "../../src/jinclude.h"
 #include "../../src/jpeglib.h"
 #include "../../src/jdct.h"
