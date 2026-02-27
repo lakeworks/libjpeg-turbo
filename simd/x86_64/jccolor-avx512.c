@@ -52,68 +52,18 @@
 #define CBCR_OFFSET     ((JLONG)CENTERJSAMPLE << SCALEBITS)
 
 /*
- * Build permute index vectors for _mm512_permutexvar_epi8 (VBMI).
+ * Byte deinterleaving via _mm512_permutex2var_epi8 (AVX-512 VBMI).
  *
- * For 3-byte pixels (RGB/BGR), 32 pixels = 96 bytes loaded into
- * a ZMM register (only the low 96 bytes matter; we load 96 bytes).
- * For 4-byte pixels (RGBX/BGRX/XBGR/XRGB), 32 pixels = 128 bytes
- * loaded into two ZMM registers.
+ * Pixel data is loaded into two ZMM registers (src_lo, src_hi):
+ *   - 3-byte pixels: 96 bytes total -> src_lo[0..63], src_hi[0..31]
+ *   - 4-byte pixels: 128 bytes total -> src_lo[0..63], src_hi[0..63]
  *
- * The permute indices extract the R, G, or B channel from the
- * interleaved pixel data.
+ * _mm512_permutex2var_epi8(src_lo, idx, src_hi) selects from the
+ * concatenated 128-byte space using a 7-bit index per output byte
+ * (bit 6 selects src_lo vs src_hi, bits 5:0 select byte within).
  *
- * MAKE_PERM3(ch): build a 64-byte index vector that picks byte at
- *   offset 'ch' from each group of 3 bytes, for positions 0..31.
- *   Bytes 32..63 are don't-care (set to 0).
- *
- * MAKE_PERM4_LO(ch): picks byte at offset 'ch' from each group of 4
- *   in the first ZMM (pixels 0..15).
- * MAKE_PERM4_HI(ch): picks byte at offset 'ch' from each group of 4
- *   in the second ZMM (pixels 16..31).
- */
-
-/*
- * Helper: build a __m512i constant from 64 individual byte values.
- * This is used to create the permute index vectors at compile time.
- */
-
-/* For 3-byte pixels: extract channel 'ch' from 32 groups of 3 bytes.
- * Input is 96 bytes in one ZMM (only first 96 bytes valid).
- * Output is 32 bytes in the low half of ZMM.
- *
- * We split into two halves:
- * - Low 32 bytes of ZMM hold input bytes [0..31]
- * - High 32 bytes of ZMM hold input bytes [32..63]
- * But we load 96 bytes, so we need two ZMM registers.
- *
- * Actually, for 3-byte pixel, 32 pixels = 96 bytes.
- * We load into two registers:
- *   zmm_lo = bytes [0..63]   (from memory)
- *   zmm_hi = bytes [64..95]  (only 32 bytes, zero-padded)
- *
- * Then we use _mm512_permutex2var_epi8 which selects bytes from
- * two source registers based on a 7-bit index (bit 6 selects which src).
- *
- * For pixel i (0..31), channel at byte offset ch, the source byte is:
- *   i * 3 + ch
- * This index is in [0..95]. If < 64, select from zmm_lo (bit6=0).
- * If >= 64, select from zmm_hi (bit6=1, index bits[5:0] = byte-64).
- */
-
-/* For 4-byte pixels: extract channel 'ch' from 32 groups of 4 bytes.
- * Input is 128 bytes in two ZMM registers.
- *   zmm_lo = pixels 0..15  = bytes [0..63]
- *   zmm_hi = pixels 16..31 = bytes [64..127]
- *
- * For the low register (pixels 0..15):
- *   pixel i, byte index = i * 4 + ch, range [0..63]
- *   Use _mm512_permutexvar_epi8(idx, zmm_lo)
- *
- * For the high register (pixels 16..31):
- *   pixel (i+16), byte index = i * 4 + ch, range [0..63]
- *   Use _mm512_permutexvar_epi8(idx, zmm_hi)
- *
- * Then combine the two 128-bit results (each has 16 bytes in low part).
+ * For pixel i (0..31), the R/G/B byte is at byte offset (i * pixelsize + ch).
+ * The MAKE_PERM_VEC macro generates the 64-byte index vector at compile time.
  */
 
 
@@ -186,409 +136,142 @@ FUNC_NAME(JDIMENSION img_width, JSAMPARRAY input_buf,                     \
                                                                           \
     for (col = 0; col < num_cols; ) {                                     \
       JDIMENSION remaining = num_cols - col;                              \
+      int is_tail = (remaining < 32);                                     \
+      __mmask64 store_mask = 0;                                           \
+      __m512i r_bytes, g_bytes, b_bytes;                                  \
                                                                           \
-      if (remaining >= 32) {                                              \
-        /* Main loop: process 32 pixels. */                               \
-        __m512i r_bytes, g_bytes, b_bytes;                                \
+      if (!is_tail) {                                                     \
         DEINTERLEAVE_LOAD(inptr, PIXEL_SIZE,                              \
                           perm_r, perm_g, perm_b,                         \
                           r_bytes, g_bytes, b_bytes)                      \
-                                                                          \
-        /* r_bytes, g_bytes, b_bytes each contain 32 bytes in the low     \
-         * 256 bits (for 3-byte pixels) or across both halves (4-byte).   \
-         * Zero-extend to 16-bit words: split into low and high halves    \
-         * of 16 pixels each.                                             \
-         */                                                               \
-        __m256i r_lo256 = _mm512_castsi512_si256(r_bytes);                \
-        __m256i r_hi256 = _mm512_extracti64x4_epi64(r_bytes, 1);         \
-        __m256i g_lo256 = _mm512_castsi512_si256(g_bytes);                \
-        __m256i g_hi256 = _mm512_extracti64x4_epi64(g_bytes, 1);         \
-        __m256i b_lo256 = _mm512_castsi512_si256(b_bytes);                \
-        __m256i b_hi256 = _mm512_extracti64x4_epi64(b_bytes, 1);         \
-                                                                          \
-        /* Zero-extend low 16 bytes of each 256-bit half to 16-bit words  \
-         * in a 512-bit register. This gives us 16 words per ZMM.        \
-         */                                                               \
-        __m512i rw_lo = _mm512_cvtepu8_epi16(r_lo256);                   \
-        __m512i rw_hi = _mm512_cvtepu8_epi16(r_hi256);                   \
-        __m512i gw_lo = _mm512_cvtepu8_epi16(g_lo256);                   \
-        __m512i gw_hi = _mm512_cvtepu8_epi16(g_hi256);                   \
-        __m512i bw_lo = _mm512_cvtepu8_epi16(b_lo256);                   \
-        __m512i bw_hi = _mm512_cvtepu8_epi16(b_hi256);                   \
-                                                                          \
-        /* ---- Compute Y ---- */                                         \
-        /* Y = (FIX_029900*R + FIX_033700*G) + (FIX_011400*B + FIX_025000*G) */ \
-        /*                                                                  \
-         * Interleave R and G as word pairs, then madd with coefficients.   \
-         * rg_lo_even = (R0, G0, R1, G1, ..., R15, G15) as words          \
-         * Then madd_epi16 gives 32-bit: R0*0.299 + G0*0.337, ...         \
-         */                                                               \
-        __m512i rg_even, rg_odd;                                          \
-        __m512i bg_even, bg_odd;                                          \
-        __m512i y_even, y_odd;                                            \
-                                                                          \
-        /* Low 16 pixels (even set) */                                    \
-        rg_even = _mm512_unpacklo_epi16(rw_lo, gw_lo);                   \
-        rg_odd  = _mm512_unpackhi_epi16(rw_lo, gw_lo);                   \
-        bg_even = _mm512_unpacklo_epi16(bw_lo, gw_lo);                   \
-        bg_odd  = _mm512_unpackhi_epi16(bw_lo, gw_lo);                   \
-                                                                          \
-        __m512i y_rg_even = _mm512_madd_epi16(rg_even, pw_f0299_f0337);  \
-        __m512i y_rg_odd  = _mm512_madd_epi16(rg_odd,  pw_f0299_f0337); \
-        __m512i y_bg_even = _mm512_madd_epi16(bg_even, pw_f0114_f0250);  \
-        __m512i y_bg_odd  = _mm512_madd_epi16(bg_odd,  pw_f0114_f0250); \
-                                                                          \
-        y_even = _mm512_add_epi32(y_rg_even, y_bg_even);                 \
-        y_even = _mm512_add_epi32(y_even, pd_onehalf);                   \
-        y_even = _mm512_srli_epi32(y_even, SCALEBITS);                   \
-                                                                          \
-        y_odd = _mm512_add_epi32(y_rg_odd, y_bg_odd);                    \
-        y_odd = _mm512_add_epi32(y_odd, pd_onehalf);                     \
-        y_odd = _mm512_srli_epi32(y_odd, SCALEBITS);                     \
-                                                                          \
-        __m512i y_lo = _mm512_packs_epi32(y_even, y_odd);                \
-                                                                          \
-        /* High 16 pixels */                                              \
-        rg_even = _mm512_unpacklo_epi16(rw_hi, gw_hi);                   \
-        rg_odd  = _mm512_unpackhi_epi16(rw_hi, gw_hi);                   \
-        bg_even = _mm512_unpacklo_epi16(bw_hi, gw_hi);                   \
-        bg_odd  = _mm512_unpackhi_epi16(bw_hi, gw_hi);                   \
-                                                                          \
-        y_rg_even = _mm512_madd_epi16(rg_even, pw_f0299_f0337);          \
-        y_rg_odd  = _mm512_madd_epi16(rg_odd,  pw_f0299_f0337);         \
-        y_bg_even = _mm512_madd_epi16(bg_even, pw_f0114_f0250);          \
-        y_bg_odd  = _mm512_madd_epi16(bg_odd,  pw_f0114_f0250);         \
-                                                                          \
-        y_even = _mm512_add_epi32(y_rg_even, y_bg_even);                 \
-        y_even = _mm512_add_epi32(y_even, pd_onehalf);                   \
-        y_even = _mm512_srli_epi32(y_even, SCALEBITS);                   \
-                                                                          \
-        y_odd = _mm512_add_epi32(y_rg_odd, y_bg_odd);                    \
-        y_odd = _mm512_add_epi32(y_odd, pd_onehalf);                     \
-        y_odd = _mm512_srli_epi32(y_odd, SCALEBITS);                     \
-                                                                          \
-        __m512i y_hi = _mm512_packs_epi32(y_even, y_odd);                \
-                                                                          \
-        /* ---- Compute Cb ---- */                                        \
-        /* Cb = (-FIX_016874*R + -FIX_033126*G) + FIX_050000*B + bias */  \
-        __m512i cb_rg_even, cb_rg_odd;                                    \
-        __m512i cb_even, cb_odd;                                          \
-        __m512i b_shifted;                                                \
-                                                                          \
-        /* Low 16 pixels */                                               \
-        rg_even = _mm512_unpacklo_epi16(rw_lo, gw_lo);                   \
-        rg_odd  = _mm512_unpackhi_epi16(rw_lo, gw_lo);                   \
-                                                                          \
-        cb_rg_even = _mm512_madd_epi16(rg_even, pw_mf016_mf033);         \
-        cb_rg_odd  = _mm512_madd_epi16(rg_odd,  pw_mf016_mf033);        \
-                                                                          \
-        /* B * FIX(0.500) = B * 32768 = B << 15                           \
-         * But B is 16-bit unsigned [0..255], so B<<15 fits in 32-bit.    \
-         * We need B as 32-bit first. Use unpacklo/hi with zero.          \
-         */                                                               \
-        __m512i bw_lo_even32 = _mm512_unpacklo_epi16(bw_lo, zero);       \
-        __m512i bw_lo_odd32  = _mm512_unpackhi_epi16(bw_lo, zero);       \
-        b_shifted = _mm512_slli_epi32(bw_lo_even32, 15);                 \
-        cb_even = _mm512_add_epi32(cb_rg_even, b_shifted);               \
-        cb_even = _mm512_add_epi32(cb_even, pd_onehalfm1_cj);            \
-        cb_even = _mm512_srli_epi32(cb_even, SCALEBITS);                 \
-                                                                          \
-        b_shifted = _mm512_slli_epi32(bw_lo_odd32, 15);                  \
-        cb_odd = _mm512_add_epi32(cb_rg_odd, b_shifted);                 \
-        cb_odd = _mm512_add_epi32(cb_odd, pd_onehalfm1_cj);              \
-        cb_odd = _mm512_srli_epi32(cb_odd, SCALEBITS);                   \
-                                                                          \
-        __m512i cb_lo = _mm512_packs_epi32(cb_even, cb_odd);             \
-                                                                          \
-        /* High 16 pixels */                                              \
-        rg_even = _mm512_unpacklo_epi16(rw_hi, gw_hi);                   \
-        rg_odd  = _mm512_unpackhi_epi16(rw_hi, gw_hi);                   \
-                                                                          \
-        cb_rg_even = _mm512_madd_epi16(rg_even, pw_mf016_mf033);         \
-        cb_rg_odd  = _mm512_madd_epi16(rg_odd,  pw_mf016_mf033);        \
-                                                                          \
-        __m512i bw_hi_even32 = _mm512_unpacklo_epi16(bw_hi, zero);       \
-        __m512i bw_hi_odd32  = _mm512_unpackhi_epi16(bw_hi, zero);       \
-        b_shifted = _mm512_slli_epi32(bw_hi_even32, 15);                 \
-        cb_even = _mm512_add_epi32(cb_rg_even, b_shifted);               \
-        cb_even = _mm512_add_epi32(cb_even, pd_onehalfm1_cj);            \
-        cb_even = _mm512_srli_epi32(cb_even, SCALEBITS);                 \
-                                                                          \
-        b_shifted = _mm512_slli_epi32(bw_hi_odd32, 15);                  \
-        cb_odd = _mm512_add_epi32(cb_rg_odd, b_shifted);                 \
-        cb_odd = _mm512_add_epi32(cb_odd, pd_onehalfm1_cj);              \
-        cb_odd = _mm512_srli_epi32(cb_odd, SCALEBITS);                   \
-                                                                          \
-        __m512i cb_hi = _mm512_packs_epi32(cb_even, cb_odd);             \
-                                                                          \
-        /* ---- Compute Cr ---- */                                        \
-        /* Cr = FIX_050000*R + (-FIX_041869*G + -FIX_008131*B) + bias */  \
-        __m512i cr_gb_even, cr_gb_odd;                                    \
-        __m512i cr_even, cr_odd;                                          \
-        __m512i r_shifted;                                                \
-                                                                          \
-        /* Low 16 pixels */                                               \
-        /* Pair (B, G) for the negative coefficients:                     \
-         * B*(-FIX_008131) + G*(-FIX_041869) = -0.08131*B - 0.41869*G   \
-         */                                                               \
-        __m512i bg_lo_even_cr = _mm512_unpacklo_epi16(bw_lo, gw_lo);     \
-        __m512i bg_lo_odd_cr  = _mm512_unpackhi_epi16(bw_lo, gw_lo);     \
-                                                                          \
-        cr_gb_even = _mm512_madd_epi16(bg_lo_even_cr, pw_mf008_mf041);   \
-        cr_gb_odd  = _mm512_madd_epi16(bg_lo_odd_cr,  pw_mf008_mf041);  \
-                                                                          \
-        /* R * FIX(0.500) = R << 15 */                                    \
-        __m512i rw_lo_even32 = _mm512_unpacklo_epi16(rw_lo, zero);       \
-        __m512i rw_lo_odd32  = _mm512_unpackhi_epi16(rw_lo, zero);       \
-        r_shifted = _mm512_slli_epi32(rw_lo_even32, 15);                 \
-        cr_even = _mm512_add_epi32(cr_gb_even, r_shifted);               \
-        cr_even = _mm512_add_epi32(cr_even, pd_onehalfm1_cj);            \
-        cr_even = _mm512_srli_epi32(cr_even, SCALEBITS);                 \
-                                                                          \
-        r_shifted = _mm512_slli_epi32(rw_lo_odd32, 15);                  \
-        cr_odd = _mm512_add_epi32(cr_gb_odd, r_shifted);                 \
-        cr_odd = _mm512_add_epi32(cr_odd, pd_onehalfm1_cj);              \
-        cr_odd = _mm512_srli_epi32(cr_odd, SCALEBITS);                   \
-                                                                          \
-        __m512i cr_lo = _mm512_packs_epi32(cr_even, cr_odd);             \
-                                                                          \
-        /* High 16 pixels */                                              \
-        __m512i bg_hi_even_cr = _mm512_unpacklo_epi16(bw_hi, gw_hi);     \
-        __m512i bg_hi_odd_cr  = _mm512_unpackhi_epi16(bw_hi, gw_hi);     \
-                                                                          \
-        cr_gb_even = _mm512_madd_epi16(bg_hi_even_cr, pw_mf008_mf041);   \
-        cr_gb_odd  = _mm512_madd_epi16(bg_hi_odd_cr,  pw_mf008_mf041);  \
-                                                                          \
-        __m512i rw_hi_even32 = _mm512_unpacklo_epi16(rw_hi, zero);       \
-        __m512i rw_hi_odd32  = _mm512_unpackhi_epi16(rw_hi, zero);       \
-        r_shifted = _mm512_slli_epi32(rw_hi_even32, 15);                 \
-        cr_even = _mm512_add_epi32(cr_gb_even, r_shifted);               \
-        cr_even = _mm512_add_epi32(cr_even, pd_onehalfm1_cj);            \
-        cr_even = _mm512_srli_epi32(cr_even, SCALEBITS);                 \
-                                                                          \
-        r_shifted = _mm512_slli_epi32(rw_hi_odd32, 15);                  \
-        cr_odd = _mm512_add_epi32(cr_gb_odd, r_shifted);                 \
-        cr_odd = _mm512_add_epi32(cr_odd, pd_onehalfm1_cj);              \
-        cr_odd = _mm512_srli_epi32(cr_odd, SCALEBITS);                   \
-                                                                          \
-        __m512i cr_hi = _mm512_packs_epi32(cr_even, cr_odd);             \
-                                                                          \
-        /* ---- Pack 16-bit words down to 8-bit bytes ---- */             \
-        /* _mm512_packs_epi32 produced signed 16-bit values in [0..255].  \
-         * _mm512_packus_epi16 saturates signed 16-bit to unsigned 8-bit. \
-         * y_lo has 16 words (lo pixels), y_hi has 16 words (hi pixels).  \
-         * packus gives 32 bytes per output ZMM.                          \
-         *                                                                \
-         * NOTE: _mm512_packs_epi32 interleaves lanes (128-bit granularity), \
-         * so the order within each 128-bit lane is:                      \
-         *   lane[i] = {even[0..3], odd[0..3]} as 16-bit                  \
-         * And _mm512_packus_epi16 similarly interleaves.                 \
-         * We need to fix the lane ordering at the end.                   \
-         */                                                               \
-        __m512i y_packed  = _mm512_packus_epi16(y_lo,  y_hi);            \
-        __m512i cb_packed = _mm512_packus_epi16(cb_lo, cb_hi);           \
-        __m512i cr_packed = _mm512_packus_epi16(cr_lo, cr_hi);           \
-                                                                          \
-        /* Fix the cross-lane interleaving from pack operations.          \
-         * After unpacklo/hi + packs_epi32 + packus_epi16, the data is    \
-         * shuffled within 128-bit lanes.  We need a final permutation    \
-         * to restore pixel order.                                        \
-         *                                                                \
-         * The sequence unpacklo/hi_epi16 -> packs_epi32 -> packus_epi16  \
-         * on 512-bit registers operates on each 128-bit lane             \
-         * independently. The result of packus_epi16(lo, hi) has:         \
-         *   lane0: lo_lane0_bytes[0..7], hi_lane0_bytes[0..7]            \
-         *   lane1: lo_lane1_bytes[0..7], hi_lane1_bytes[0..7]            \
-         *   lane2: lo_lane2_bytes[0..7], hi_lane2_bytes[0..7]            \
-         *   lane3: lo_lane3_bytes[0..7], hi_lane3_bytes[0..7]            \
-         *                                                                \
-         * Due to the way unpacklo/hi interleaves within 128-bit lanes,   \
-         * the 16 pixels from the "lo" part (pixels 0..15) are at:        \
-         *   lane0 low 8: pixels 0,1,2,3                                  \
-         *   lane1 low 8: pixels 4,5,6,7                                  \
-         *   lane2 low 8: pixels 8,9,10,11                                \
-         *   lane3 low 8: pixels 12,13,14,15                              \
-         * And the 16 pixels from "hi" part (pixels 16..31) are at:       \
-         *   lane0 high 8: pixels 16,17,18,19                             \
-         *   lane1 high 8: pixels 20,21,22,23                             \
-         *   lane2 high 8: pixels 24,25,26,27                             \
-         *   lane3 high 8: pixels 28,29,30,31                             \
-         *                                                                \
-         * We need sequential order: pixels 0..31.                        \
-         * Use vpermq (64-bit permute) to rearrange the 8 qwords:         \
-         *   src qwords:  [0,1, 2,3, 4,5, 6,7]                           \
-         *   contains:    [lo0-3, hi16-19, lo4-7, hi20-23,                \
-         *                 lo8-11, hi24-27, lo12-15, hi28-31]             \
-         *   desired:     [lo0-3, lo4-7, lo8-11, lo12-15,                 \
-         *                 hi16-19, hi20-23, hi24-27, hi28-31]            \
-         *   permute idx: [0, 2, 4, 6, 1, 3, 5, 7]                       \
-         */                                                               \
-        const __m512i fix_perm = _mm512_setr_epi64(0, 2, 4, 6,           \
-                                                   1, 3, 5, 7);          \
-        y_packed  = _mm512_permutexvar_epi64(fix_perm, y_packed);         \
-        cb_packed = _mm512_permutexvar_epi64(fix_perm, cb_packed);        \
-        cr_packed = _mm512_permutexvar_epi64(fix_perm, cr_packed);        \
-                                                                          \
-        /* Store 32 bytes of Y, Cb, Cr to their respective planes. */     \
-        _mm256_storeu_si256((__m256i *)(outptr0 + col),                   \
-                            _mm512_castsi512_si256(y_packed));            \
-        _mm256_storeu_si256((__m256i *)(outptr1 + col),                   \
-                            _mm512_castsi512_si256(cb_packed));           \
-        _mm256_storeu_si256((__m256i *)(outptr2 + col),                   \
-                            _mm512_castsi512_si256(cr_packed));           \
-                                                                          \
-        inptr += 32 * PIXEL_SIZE;                                         \
-        col += 32;                                                        \
       } else {                                                            \
-        /* Tail: process remaining pixels with masked operations. */       \
         JDIMENSION load_bytes = remaining * (JDIMENSION)PIXEL_SIZE;       \
-        __mmask64 store_mask = (__mmask64)((1ULL << remaining) - 1);      \
-                                                                          \
-        __m512i r_bytes, g_bytes, b_bytes;                                \
+        store_mask = (__mmask64)((1ULL << remaining) - 1);                \
         DEINTERLEAVE_LOAD_MASKED(inptr, PIXEL_SIZE,                       \
                                  perm_r, perm_g, perm_b,                  \
                                  load_bytes,                              \
                                  r_bytes, g_bytes, b_bytes)               \
+      }                                                                   \
                                                                           \
-        __m256i r_lo256 = _mm512_castsi512_si256(r_bytes);                \
-        __m256i r_hi256 = _mm512_extracti64x4_epi64(r_bytes, 1);         \
-        __m256i g_lo256 = _mm512_castsi512_si256(g_bytes);                \
-        __m256i g_hi256 = _mm512_extracti64x4_epi64(g_bytes, 1);         \
-        __m256i b_lo256 = _mm512_castsi512_si256(b_bytes);                \
-        __m256i b_hi256 = _mm512_extracti64x4_epi64(b_bytes, 1);         \
+      /* After deinterleave, r/g/b_bytes each have 32 channel bytes in    \
+       * the low 256 bits. Zero-extend all 32 to 16-bit words in a ZMM.  \
+       * _mm512_cvtepu8_epi16 takes a __m256i (32 bytes) and produces    \
+       * 32 words across 4 x 128-bit lanes.                              \
+       */                                                                 \
+      __m256i r_256 = _mm512_castsi512_si256(r_bytes);                    \
+      __m256i g_256 = _mm512_castsi512_si256(g_bytes);                    \
+      __m256i b_256 = _mm512_castsi512_si256(b_bytes);                    \
                                                                           \
-        __m512i rw_lo = _mm512_cvtepu8_epi16(r_lo256);                   \
-        __m512i rw_hi = _mm512_cvtepu8_epi16(r_hi256);                   \
-        __m512i gw_lo = _mm512_cvtepu8_epi16(g_lo256);                   \
-        __m512i gw_hi = _mm512_cvtepu8_epi16(g_hi256);                   \
-        __m512i bw_lo = _mm512_cvtepu8_epi16(b_lo256);                   \
-        __m512i bw_hi = _mm512_cvtepu8_epi16(b_hi256);                   \
+      __m512i rw = _mm512_cvtepu8_epi16(r_256);                          \
+      __m512i gw = _mm512_cvtepu8_epi16(g_256);                          \
+      __m512i bw = _mm512_cvtepu8_epi16(b_256);                          \
                                                                           \
-        /* Y */                                                           \
-        __m512i rg_even, rg_odd, bg_even, bg_odd;                        \
-        __m512i y_even, y_odd;                                            \
-        __m512i cb_even, cb_odd, cr_even, cr_odd;                         \
+      /* ---- Compute Y ---- */                                           \
+      /* Y = (R*FIX_029900 + G*FIX_033700) + (B*FIX_011400 + G*FIX_025000) \
+       *                                                                  \
+       * unpacklo/hi_epi16 interleaves within each 128-bit lane:          \
+       *   unpacklo(rw, gw) lane_i = (R0,G0, R1,G1, R2,G2, R3,G3)       \
+       *   unpackhi(rw, gw) lane_i = (R4,G4, R5,G5, R6,G6, R7,G7)       \
+       * Each madd produces 4 dwords per lane = 16 total.                 \
+       * packs_epi32(even, odd) per lane = 8 words per lane = 32 total.   \
+       */                                                                 \
+      __m512i rg_even = _mm512_unpacklo_epi16(rw, gw);                   \
+      __m512i rg_odd  = _mm512_unpackhi_epi16(rw, gw);                   \
+      __m512i bg_even = _mm512_unpacklo_epi16(bw, gw);                   \
+      __m512i bg_odd  = _mm512_unpackhi_epi16(bw, gw);                   \
                                                                           \
-        rg_even = _mm512_unpacklo_epi16(rw_lo, gw_lo);                   \
-        rg_odd  = _mm512_unpackhi_epi16(rw_lo, gw_lo);                   \
-        bg_even = _mm512_unpacklo_epi16(bw_lo, gw_lo);                   \
-        bg_odd  = _mm512_unpackhi_epi16(bw_lo, gw_lo);                   \
+      __m512i y_rg_even = _mm512_madd_epi16(rg_even, pw_f0299_f0337);    \
+      __m512i y_rg_odd  = _mm512_madd_epi16(rg_odd,  pw_f0299_f0337);   \
+      __m512i y_bg_even = _mm512_madd_epi16(bg_even, pw_f0114_f0250);    \
+      __m512i y_bg_odd  = _mm512_madd_epi16(bg_odd,  pw_f0114_f0250);   \
                                                                           \
-        y_even = _mm512_add_epi32(                                        \
-            _mm512_madd_epi16(rg_even, pw_f0299_f0337),                  \
-            _mm512_madd_epi16(bg_even, pw_f0114_f0250));                 \
-        y_even = _mm512_srli_epi32(                                       \
-            _mm512_add_epi32(y_even, pd_onehalf), SCALEBITS);            \
-        y_odd = _mm512_add_epi32(                                         \
-            _mm512_madd_epi16(rg_odd, pw_f0299_f0337),                   \
-            _mm512_madd_epi16(bg_odd, pw_f0114_f0250));                  \
-        y_odd = _mm512_srli_epi32(                                        \
-            _mm512_add_epi32(y_odd, pd_onehalf), SCALEBITS);             \
-        __m512i yt_lo = _mm512_packs_epi32(y_even, y_odd);               \
+      __m512i y_even = _mm512_add_epi32(y_rg_even, y_bg_even);           \
+      y_even = _mm512_add_epi32(y_even, pd_onehalf);                     \
+      y_even = _mm512_srli_epi32(y_even, SCALEBITS);                     \
                                                                           \
-        rg_even = _mm512_unpacklo_epi16(rw_hi, gw_hi);                   \
-        rg_odd  = _mm512_unpackhi_epi16(rw_hi, gw_hi);                   \
-        bg_even = _mm512_unpacklo_epi16(bw_hi, gw_hi);                   \
-        bg_odd  = _mm512_unpackhi_epi16(bw_hi, gw_hi);                   \
+      __m512i y_odd = _mm512_add_epi32(y_rg_odd, y_bg_odd);              \
+      y_odd = _mm512_add_epi32(y_odd, pd_onehalf);                       \
+      y_odd = _mm512_srli_epi32(y_odd, SCALEBITS);                       \
                                                                           \
-        y_even = _mm512_add_epi32(                                        \
-            _mm512_madd_epi16(rg_even, pw_f0299_f0337),                  \
-            _mm512_madd_epi16(bg_even, pw_f0114_f0250));                 \
-        y_even = _mm512_srli_epi32(                                       \
-            _mm512_add_epi32(y_even, pd_onehalf), SCALEBITS);            \
-        y_odd = _mm512_add_epi32(                                         \
-            _mm512_madd_epi16(rg_odd, pw_f0299_f0337),                   \
-            _mm512_madd_epi16(bg_odd, pw_f0114_f0250));                  \
-        y_odd = _mm512_srli_epi32(                                        \
-            _mm512_add_epi32(y_odd, pd_onehalf), SCALEBITS);             \
-        __m512i yt_hi = _mm512_packs_epi32(y_even, y_odd);               \
+      /* packs_epi32 produces 32 signed 16-bit words in [0..255]. */      \
+      __m512i y_words = _mm512_packs_epi32(y_even, y_odd);               \
                                                                           \
-        /* Cb */                                                          \
-        rg_even = _mm512_unpacklo_epi16(rw_lo, gw_lo);                   \
-        rg_odd  = _mm512_unpackhi_epi16(rw_lo, gw_lo);                   \
-        __m512i bwle32 = _mm512_unpacklo_epi16(bw_lo, zero);             \
-        __m512i bwlo32 = _mm512_unpackhi_epi16(bw_lo, zero);             \
+      /* ---- Compute Cb ---- */                                          \
+      /* Cb = (-FIX_016874*R + -FIX_033126*G) + FIX_050000*B + bias */    \
+      __m512i cb_rg_even = _mm512_madd_epi16(rg_even, pw_mf016_mf033);   \
+      __m512i cb_rg_odd  = _mm512_madd_epi16(rg_odd,  pw_mf016_mf033);  \
                                                                           \
-        cb_even = _mm512_add_epi32(                                       \
-            _mm512_madd_epi16(rg_even, pw_mf016_mf033),                  \
-            _mm512_slli_epi32(bwle32, 15));                              \
-        cb_even = _mm512_srli_epi32(                                      \
-            _mm512_add_epi32(cb_even, pd_onehalfm1_cj), SCALEBITS);     \
-        cb_odd = _mm512_add_epi32(                                        \
-            _mm512_madd_epi16(rg_odd, pw_mf016_mf033),                   \
-            _mm512_slli_epi32(bwlo32, 15));                              \
-        cb_odd = _mm512_srli_epi32(                                       \
-            _mm512_add_epi32(cb_odd, pd_onehalfm1_cj), SCALEBITS);      \
-        __m512i cbt_lo = _mm512_packs_epi32(cb_even, cb_odd);            \
+      /* B * FIX(0.500) = B << 15.  Need B as 32-bit first. */            \
+      __m512i bw_even32 = _mm512_unpacklo_epi16(bw, zero);               \
+      __m512i bw_odd32  = _mm512_unpackhi_epi16(bw, zero);               \
                                                                           \
-        rg_even = _mm512_unpacklo_epi16(rw_hi, gw_hi);                   \
-        rg_odd  = _mm512_unpackhi_epi16(rw_hi, gw_hi);                   \
-        __m512i bwhe32 = _mm512_unpacklo_epi16(bw_hi, zero);             \
-        __m512i bwho32 = _mm512_unpackhi_epi16(bw_hi, zero);             \
+      __m512i cb_even = _mm512_add_epi32(cb_rg_even,                      \
+                            _mm512_slli_epi32(bw_even32, 15));            \
+      cb_even = _mm512_add_epi32(cb_even, pd_onehalfm1_cj);              \
+      cb_even = _mm512_srli_epi32(cb_even, SCALEBITS);                   \
                                                                           \
-        cb_even = _mm512_add_epi32(                                       \
-            _mm512_madd_epi16(rg_even, pw_mf016_mf033),                  \
-            _mm512_slli_epi32(bwhe32, 15));                              \
-        cb_even = _mm512_srli_epi32(                                      \
-            _mm512_add_epi32(cb_even, pd_onehalfm1_cj), SCALEBITS);     \
-        cb_odd = _mm512_add_epi32(                                        \
-            _mm512_madd_epi16(rg_odd, pw_mf016_mf033),                   \
-            _mm512_slli_epi32(bwho32, 15));                              \
-        cb_odd = _mm512_srli_epi32(                                       \
-            _mm512_add_epi32(cb_odd, pd_onehalfm1_cj), SCALEBITS);      \
-        __m512i cbt_hi = _mm512_packs_epi32(cb_even, cb_odd);            \
+      __m512i cb_odd = _mm512_add_epi32(cb_rg_odd,                        \
+                           _mm512_slli_epi32(bw_odd32, 15));              \
+      cb_odd = _mm512_add_epi32(cb_odd, pd_onehalfm1_cj);                \
+      cb_odd = _mm512_srli_epi32(cb_odd, SCALEBITS);                     \
                                                                           \
-        /* Cr -- pair (B, G) to match pw_mf008_mf041 = (-0.081, -0.418) */ \
-        __m512i gble = _mm512_unpacklo_epi16(bw_lo, gw_lo);              \
-        __m512i gblo = _mm512_unpackhi_epi16(bw_lo, gw_lo);              \
-        __m512i rwle32 = _mm512_unpacklo_epi16(rw_lo, zero);             \
-        __m512i rwlo32 = _mm512_unpackhi_epi16(rw_lo, zero);             \
+      __m512i cb_words = _mm512_packs_epi32(cb_even, cb_odd);             \
                                                                           \
-        cr_even = _mm512_add_epi32(                                       \
-            _mm512_madd_epi16(gble, pw_mf008_mf041),                     \
-            _mm512_slli_epi32(rwle32, 15));                              \
-        cr_even = _mm512_srli_epi32(                                      \
-            _mm512_add_epi32(cr_even, pd_onehalfm1_cj), SCALEBITS);     \
-        cr_odd = _mm512_add_epi32(                                        \
-            _mm512_madd_epi16(gblo, pw_mf008_mf041),                     \
-            _mm512_slli_epi32(rwlo32, 15));                              \
-        cr_odd = _mm512_srli_epi32(                                       \
-            _mm512_add_epi32(cr_odd, pd_onehalfm1_cj), SCALEBITS);      \
-        __m512i crt_lo = _mm512_packs_epi32(cr_even, cr_odd);            \
+      /* ---- Compute Cr ---- */                                          \
+      /* Cr = FIX_050000*R + (-FIX_008131*B + -FIX_041869*G) + bias */    \
+      /* Pair (B, G) with (-FIX_008131, -FIX_041869). */                  \
+      __m512i bg_even_cr = _mm512_unpacklo_epi16(bw, gw);                \
+      __m512i bg_odd_cr  = _mm512_unpackhi_epi16(bw, gw);                \
                                                                           \
-        __m512i gbhe = _mm512_unpacklo_epi16(bw_hi, gw_hi);              \
-        __m512i gbho = _mm512_unpackhi_epi16(bw_hi, gw_hi);              \
-        __m512i rwhe32 = _mm512_unpacklo_epi16(rw_hi, zero);             \
-        __m512i rwho32 = _mm512_unpackhi_epi16(rw_hi, zero);             \
+      __m512i cr_bg_even = _mm512_madd_epi16(bg_even_cr, pw_mf008_mf041);\
+      __m512i cr_bg_odd  = _mm512_madd_epi16(bg_odd_cr,  pw_mf008_mf041);\
                                                                           \
-        cr_even = _mm512_add_epi32(                                       \
-            _mm512_madd_epi16(gbhe, pw_mf008_mf041),                     \
-            _mm512_slli_epi32(rwhe32, 15));                              \
-        cr_even = _mm512_srli_epi32(                                      \
-            _mm512_add_epi32(cr_even, pd_onehalfm1_cj), SCALEBITS);     \
-        cr_odd = _mm512_add_epi32(                                        \
-            _mm512_madd_epi16(gbho, pw_mf008_mf041),                     \
-            _mm512_slli_epi32(rwho32, 15));                              \
-        cr_odd = _mm512_srli_epi32(                                       \
-            _mm512_add_epi32(cr_odd, pd_onehalfm1_cj), SCALEBITS);      \
-        __m512i crt_hi = _mm512_packs_epi32(cr_even, cr_odd);            \
+      /* R * FIX(0.500) = R << 15 */                                      \
+      __m512i rw_even32 = _mm512_unpacklo_epi16(rw, zero);               \
+      __m512i rw_odd32  = _mm512_unpackhi_epi16(rw, zero);               \
                                                                           \
-        /* Pack and fix lane ordering */                                  \
-        __m512i yt_packed  = _mm512_packus_epi16(yt_lo,  yt_hi);         \
-        __m512i cbt_packed = _mm512_packus_epi16(cbt_lo, cbt_hi);        \
-        __m512i crt_packed = _mm512_packus_epi16(crt_lo, crt_hi);        \
+      __m512i cr_even = _mm512_add_epi32(cr_bg_even,                      \
+                            _mm512_slli_epi32(rw_even32, 15));            \
+      cr_even = _mm512_add_epi32(cr_even, pd_onehalfm1_cj);              \
+      cr_even = _mm512_srli_epi32(cr_even, SCALEBITS);                   \
                                                                           \
-        const __m512i tfix_perm = _mm512_setr_epi64(0, 2, 4, 6,          \
-                                                    1, 3, 5, 7);         \
-        yt_packed  = _mm512_permutexvar_epi64(tfix_perm, yt_packed);      \
-        cbt_packed = _mm512_permutexvar_epi64(tfix_perm, cbt_packed);     \
-        crt_packed = _mm512_permutexvar_epi64(tfix_perm, crt_packed);     \
+      __m512i cr_odd = _mm512_add_epi32(cr_bg_odd,                        \
+                           _mm512_slli_epi32(rw_odd32, 15));              \
+      cr_odd = _mm512_add_epi32(cr_odd, pd_onehalfm1_cj);                \
+      cr_odd = _mm512_srli_epi32(cr_odd, SCALEBITS);                     \
                                                                           \
-        /* Masked store of remaining bytes */                             \
-        _mm512_mask_storeu_epi8(outptr0 + col, store_mask, yt_packed);    \
-        _mm512_mask_storeu_epi8(outptr1 + col, store_mask, cbt_packed);   \
-        _mm512_mask_storeu_epi8(outptr2 + col, store_mask, crt_packed);   \
+      __m512i cr_words = _mm512_packs_epi32(cr_even, cr_odd);             \
                                                                           \
+      /* ---- Pack 16-bit words to 8-bit bytes ---- */                    \
+      /* packs_epi32 interleaves within 128-bit lanes:                    \
+       *   lane_i = {even[0..3], odd[0..3]} as 16-bit words              \
+       * which is correct pixel order (0..7) within each lane.            \
+       *                                                                  \
+       * Use VPMOVWB (_mm512_cvtepi16_epi8) to truncate 32 words to      \
+       * 32 bytes in a __m256i. Since values are in [0..255],             \
+       * truncation (keeping low byte) is equivalent to saturation.       \
+       * The output preserves the per-lane ordering of the input.         \
+       */                                                                 \
+      __m256i y_out  = _mm512_cvtepi16_epi8(y_words);                    \
+      __m256i cb_out = _mm512_cvtepi16_epi8(cb_words);                   \
+      __m256i cr_out = _mm512_cvtepi16_epi8(cr_words);                   \
+                                                                          \
+      /* Store Y, Cb, Cr to their respective output planes. */            \
+      if (!is_tail) {                                                     \
+        _mm256_storeu_si256((__m256i *)(outptr0 + col), y_out);           \
+        _mm256_storeu_si256((__m256i *)(outptr1 + col), cb_out);          \
+        _mm256_storeu_si256((__m256i *)(outptr2 + col), cr_out);          \
+        inptr += 32 * PIXEL_SIZE;                                         \
+        col += 32;                                                        \
+      } else {                                                            \
+        /* Masked store for tail pixels (< 32 remaining). */              \
+        /* Widen __m256i to __m512i for _mm512_mask_storeu_epi8. */       \
+        _mm512_mask_storeu_epi8(outptr0 + col, store_mask,                \
+                                _mm512_castsi256_si512(y_out));           \
+        _mm512_mask_storeu_epi8(outptr1 + col, store_mask,                \
+                                _mm512_castsi256_si512(cb_out));          \
+        _mm512_mask_storeu_epi8(outptr2 + col, store_mask,                \
+                                _mm512_castsi256_si512(cr_out));          \
         col += remaining;                                                 \
       }                                                                   \
     }                                                                     \
@@ -671,12 +354,9 @@ FUNC_NAME(JDIMENSION img_width, JSAMPARRAY input_buf,                     \
  * For 3-byte pixels: load 96 bytes using two loads (64 + 32).
  * For 4-byte pixels: load 128 bytes using two 64-byte loads.
  *
- * After permutex2var, each output register has 32 bytes of one channel
- * in positions [0..31], with positions [32..63] being don't-care.
- *
- * We then rearrange so that bytes [0..15] are in the low 256-bit half
- * and bytes [16..31] are in the high 256-bit half, suitable for
- * _mm512_cvtepu8_epi16 which operates on the low 256 bits.
+ * After permutex2var, each output register has 32 channel bytes in
+ * positions [0..31] (the low 256 bits). The caller extracts the low
+ * __m256i and passes it to _mm512_cvtepu8_epi16 to get 32 words.
  */
 #define DEINTERLEAVE_LOAD(inptr, PS, pr, pg, pb, r_out, g_out, b_out)     \
   {                                                                       \
@@ -691,61 +371,13 @@ FUNC_NAME(JDIMENSION img_width, JSAMPARRAY input_buf,                     \
       src_lo = _mm512_loadu_si512((const __m512i *)(inptr));              \
       src_hi = _mm512_loadu_si512((const __m512i *)((inptr) + 64));       \
     }                                                                     \
-    /* Extract each channel: 32 bytes in positions [0..31] */             \
-    __m512i r_raw = _mm512_permutex2var_epi8(src_lo, pr, src_hi);         \
-    __m512i g_raw = _mm512_permutex2var_epi8(src_lo, pg, src_hi);         \
-    __m512i b_raw = _mm512_permutex2var_epi8(src_lo, pb, src_hi);         \
-    /* r_raw has 32 channel bytes in the low 256 bits (bytes 0..31).      \
-     * Split into two halves for cvtepu8_epi16:                           \
-     *   low 256 bits  = bytes 0..15  (for pixels 0..15)                  \
-     *   high 256 bits = bytes 16..31 (for pixels 16..31)                 \
-     * Bytes 0..15 are already in the low 128 bits of the low 256-bit     \
-     * lane. Bytes 16..31 are in the high 128 bits of the low 256-bit     \
-     * lane. We need to move bytes 16..31 into the low 128 bits of        \
-     * the high 256-bit lane.                                             \
-     *                                                                    \
-     * Use vpermq to rearrange: qword layout after permutex2var:          \
-     *   q0=[0..7], q1=[8..15], q2=[16..23], q3=[24..31],                \
-     *   q4=[32..39], q5=[40..47], q6=[48..55], q7=[56..63]              \
-     * We want: q0,q1 in low ymm, q2,q3 in high ymm.                     \
-     * That is: rearrange to q0,q1,dc,dc, q2,q3,dc,dc.                   \
-     * But _mm512_cvtepu8_epi16 takes a __m256i and zero-extends the      \
-     * low 128 bits. So we need:                                          \
-     *   low half:  __m256i with bytes[0..15] in low 128 bits             \
-     *   high half: __m256i with bytes[16..31] in low 128 bits            \
-     * The low __m256i = _mm512_castsi512_si256(r_raw) has q0,q1 which    \
-     * is bytes[0..15] -- perfect.                                        \
-     * The high __m256i needs bytes[16..31] in its low 128 bits.          \
-     * bytes[16..31] = q2,q3 which are at offset 128 bits in r_raw.      \
-     * _mm512_extracti64x4_epi64(r_raw, 0) gets the low 256 bits,        \
-     * then we need the high 128 of that. Or just shift:                  \
-     * __m256i hi = _mm256_extracti128_si256(lo256, 1) cast to __m256i.   \
-     *                                                                    \
-     * Actually simpler: just store the full 256-bit low half and         \
-     * extract bytes [16..31] using _mm512_extracti32x4_epi32.            \
+    /* Extract each channel: 32 bytes in positions [0..31] of the         \
+     * output ZMM register. Bytes [32..63] are don't-care.                \
+     * The low 256 bits contain all 32 channel bytes.                     \
      */                                                                   \
-    /* Re-pack: low 256 bits has bytes 0..31. Split at byte 16. */        \
-    __m256i r_lo256_raw = _mm512_castsi512_si256(r_raw);                  \
-    __m256i g_lo256_raw = _mm512_castsi512_si256(g_raw);                  \
-    __m256i b_lo256_raw = _mm512_castsi512_si256(b_raw);                  \
-    /* For cvtepu8_epi16, we need __m256i input where low 128 bits        \
-     * contain the 16 bytes to extend.                                    \
-     * lo256_raw has bytes[0..15] in low 128, bytes[16..31] in high 128.  \
-     * For pixels 0..15: just pass lo256_raw (cvt uses low 128 bits).     \
-     * For pixels 16..31: need bytes[16..31] in low 128 bits.             \
-     */                                                                   \
-    __m128i r_hi128 = _mm256_extracti128_si256(r_lo256_raw, 1);           \
-    __m128i g_hi128 = _mm256_extracti128_si256(g_lo256_raw, 1);           \
-    __m128i b_hi128 = _mm256_extracti128_si256(b_lo256_raw, 1);           \
-    r_out = _mm512_inserti64x4(                                           \
-        _mm512_castsi256_si512(r_lo256_raw),                              \
-        _mm256_castsi128_si256(r_hi128), 1);                              \
-    g_out = _mm512_inserti64x4(                                           \
-        _mm512_castsi256_si512(g_lo256_raw),                              \
-        _mm256_castsi128_si256(g_hi128), 1);                              \
-    b_out = _mm512_inserti64x4(                                           \
-        _mm512_castsi256_si512(b_lo256_raw),                              \
-        _mm256_castsi128_si256(b_hi128), 1);                              \
+    r_out = _mm512_permutex2var_epi8(src_lo, pr, src_hi);                 \
+    g_out = _mm512_permutex2var_epi8(src_lo, pg, src_hi);                 \
+    b_out = _mm512_permutex2var_epi8(src_lo, pb, src_hi);                 \
   }
 
 
@@ -757,56 +389,23 @@ FUNC_NAME(JDIMENSION img_width, JSAMPARRAY input_buf,                     \
                                  load_bytes, r_out, g_out, b_out)         \
   {                                                                       \
     __m512i src_lo, src_hi;                                               \
-    if ((PS) == 3) {                                                      \
-      /* Up to 93 bytes (31 pixels * 3). Load up to 64 from first reg,    \
-       * remainder from second. */                                        \
-      if (load_bytes <= 64) {                                             \
-        __mmask64 mask1 = (__mmask64)((load_bytes >= 64) ?                \
-            0xFFFFFFFFFFFFFFFFULL : ((1ULL << load_bytes) - 1));          \
-        src_lo = _mm512_maskz_loadu_epi8(mask1,                           \
-                                         (const __m512i *)(inptr));       \
-        src_hi = _mm512_setzero_si512();                                  \
-      } else {                                                            \
-        src_lo = _mm512_loadu_si512((const __m512i *)(inptr));            \
-        JDIMENSION rem = load_bytes - 64;                                 \
-        __mmask64 mask2 = (__mmask64)((1ULL << rem) - 1);                 \
-        src_hi = _mm512_maskz_loadu_epi8(mask2,                           \
-                                         (const __m512i *)((inptr) + 64));\
-      }                                                                   \
+    if (load_bytes <= 64) {                                               \
+      __mmask64 mask1 = (load_bytes >= 64) ?                              \
+          (__mmask64)0xFFFFFFFFFFFFFFFFULL :                               \
+          (__mmask64)((1ULL << load_bytes) - 1);                          \
+      src_lo = _mm512_maskz_loadu_epi8(mask1,                             \
+                                       (const __m512i *)(inptr));         \
+      src_hi = _mm512_setzero_si512();                                    \
     } else {                                                              \
-      /* Up to 124 bytes (31 pixels * 4). */                              \
-      if (load_bytes <= 64) {                                             \
-        __mmask64 mask1 = (__mmask64)((load_bytes >= 64) ?                \
-            0xFFFFFFFFFFFFFFFFULL : ((1ULL << load_bytes) - 1));          \
-        src_lo = _mm512_maskz_loadu_epi8(mask1,                           \
-                                         (const __m512i *)(inptr));       \
-        src_hi = _mm512_setzero_si512();                                  \
-      } else {                                                            \
-        src_lo = _mm512_loadu_si512((const __m512i *)(inptr));            \
-        JDIMENSION rem = load_bytes - 64;                                 \
-        __mmask64 mask2 = (__mmask64)((1ULL << rem) - 1);                 \
-        src_hi = _mm512_maskz_loadu_epi8(mask2,                           \
-                                         (const __m512i *)((inptr) + 64));\
-      }                                                                   \
+      src_lo = _mm512_loadu_si512((const __m512i *)(inptr));              \
+      JDIMENSION rem = load_bytes - 64;                                   \
+      __mmask64 mask2 = (__mmask64)((1ULL << rem) - 1);                   \
+      src_hi = _mm512_maskz_loadu_epi8(mask2,                             \
+                                       (const __m512i *)((inptr) + 64));  \
     }                                                                     \
-    __m512i r_raw = _mm512_permutex2var_epi8(src_lo, pr, src_hi);         \
-    __m512i g_raw = _mm512_permutex2var_epi8(src_lo, pg, src_hi);         \
-    __m512i b_raw = _mm512_permutex2var_epi8(src_lo, pb, src_hi);         \
-    __m256i r_lo256_raw = _mm512_castsi512_si256(r_raw);                  \
-    __m256i g_lo256_raw = _mm512_castsi512_si256(g_raw);                  \
-    __m256i b_lo256_raw = _mm512_castsi512_si256(b_raw);                  \
-    __m128i r_hi128 = _mm256_extracti128_si256(r_lo256_raw, 1);           \
-    __m128i g_hi128 = _mm256_extracti128_si256(g_lo256_raw, 1);           \
-    __m128i b_hi128 = _mm256_extracti128_si256(b_lo256_raw, 1);           \
-    r_out = _mm512_inserti64x4(                                           \
-        _mm512_castsi256_si512(r_lo256_raw),                              \
-        _mm256_castsi128_si256(r_hi128), 1);                              \
-    g_out = _mm512_inserti64x4(                                           \
-        _mm512_castsi256_si512(g_lo256_raw),                              \
-        _mm256_castsi128_si256(g_hi128), 1);                              \
-    b_out = _mm512_inserti64x4(                                           \
-        _mm512_castsi256_si512(b_lo256_raw),                              \
-        _mm256_castsi128_si256(b_hi128), 1);                              \
+    r_out = _mm512_permutex2var_epi8(src_lo, pr, src_hi);                 \
+    g_out = _mm512_permutex2var_epi8(src_lo, pg, src_hi);                 \
+    b_out = _mm512_permutex2var_epi8(src_lo, pb, src_hi);                 \
   }
 
 
