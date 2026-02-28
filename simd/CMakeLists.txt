@@ -138,9 +138,9 @@ if(CPU_TYPE STREQUAL "x86_64")
     x86_64/jfdctint-avx2.asm x86_64/jidctint-avx2.asm x86_64/jquanti-avx2.asm)
 
   # AVX-512 implementations (C intrinsics)
+  # Only upsample, downsample, and quantize benefit from 512-bit width on Zen 5.
+  # Color convert, DCT, IDCT, merged upsample fall back to AVX2 NASM.
   set(AVX512_SOURCES
-    x86_64/jccolor-avx512.c x86_64/jdcolor-avx512.c x86_64/jdmerge-avx512.c
-    x86_64/jfdctint-avx512.c x86_64/jidctint-avx512.c
     x86_64/jquanti-avx512.c x86_64/jcsample-avx512.c
     x86_64/jdsample-avx512.c)
 
