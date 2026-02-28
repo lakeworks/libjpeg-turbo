@@ -72,14 +72,17 @@ EXTN(jpeg_simd_cpu_support):
 
     or          rdi, JSIMD_AVX2
 
-    ; Check for AVX-512F and AVX-512BW instruction support
+    ; Check for AVX-512F, AVX-512BW, and AVX-512VBMI instruction support
     ; (CPUID leaf 7 was already called above; reload)
     mov         rax, 7
     xor         rcx, rcx
     cpuid
+    ; After cpuid: rbx = EBX (F/BW bits), rcx = ECX (VBMI bit)
     test        rbx, 1 << 16            ; bit16:AVX-512F
     jz          short .return
     test        rbx, 1 << 30            ; bit30:AVX-512BW
+    jz          short .return
+    test        rcx, 1 << 1             ; bit1:AVX-512VBMI (needed by vpermb in upsample)
     jz          short .return
 
     ; Check for AVX-512 O/S support (opmask + ZMM state)
