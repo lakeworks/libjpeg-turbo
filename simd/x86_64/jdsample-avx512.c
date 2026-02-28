@@ -21,9 +21,10 @@
 #include <immintrin.h>
 
 /* Build marker — detectable via: strings php8ts.dll | findstr LAKEWORKS
- * or from PHP: php -r "echo bin2hex(file_get_contents('php8ts.dll'));" | findstr pattern
+ * or from PHP userland: see tools/verify-jpeg-simd.php
+ * volatile prevents dead-code elimination of this unreferenced string.
  */
-const char jsimd_avx512_build_id[] =
+static volatile const char jsimd_avx512_build_id[] =
   "LAKEWORKS_LIBJPEG_TURBO_AVX512_ZEN5_V1";
 
 /*
