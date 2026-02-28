@@ -43,7 +43,7 @@ EXTN(jpeg_simd_cpu_support):
     mov         rax, 0
     cpuid
     cmp         rax, 7
-    jl          short .return           ; Maximum leaf < 07H
+    jl          near .return           ; Maximum leaf < 07H
 
     ; Check for AVX2 instruction support
     mov         rax, 7
@@ -52,23 +52,23 @@ EXTN(jpeg_simd_cpu_support):
     mov         rax, rbx                ; rax = Extended feature flags
 
     test        rax, 1 << 5             ; bit5:AVX2
-    jz          short .return
+    jz          near .return
 
     ; Check for AVX2 O/S support
     mov         rax, 1
     xor         rcx, rcx
     cpuid
     test        rcx, 1 << 27
-    jz          short .return           ; O/S does not support XSAVE
+    jz          near .return           ; O/S does not support XSAVE
     test        rcx, 1 << 28
-    jz          short .return           ; CPU does not support AVX2
+    jz          near .return           ; CPU does not support AVX2
 
     xor         rcx, rcx
     xgetbv
     and         rax, 6
     cmp         rax, 6                  ; O/S does not manage XMM/YMM state
                                         ; using XSAVE
-    jnz         short .return
+    jnz         near .return
 
     or          rdi, JSIMD_AVX2
 
@@ -79,18 +79,18 @@ EXTN(jpeg_simd_cpu_support):
     cpuid
     ; After cpuid: rbx = EBX (F/BW bits), rcx = ECX (VBMI bit)
     test        rbx, 1 << 16            ; bit16:AVX-512F
-    jz          short .return
+    jz          near .return
     test        rbx, 1 << 30            ; bit30:AVX-512BW
-    jz          short .return
+    jz          near .return
     test        rcx, 1 << 1             ; bit1:AVX-512VBMI (needed by vpermb in upsample)
-    jz          short .return
+    jz          near .return
 
     ; Check for AVX-512 O/S support (opmask + ZMM state)
     xor         rcx, rcx
     xgetbv
     and         rax, 0xE0               ; bits 5,6,7
     cmp         rax, 0xE0               ; O/S manages opmask/ZMM_Hi256/Hi16_ZMM
-    jnz         short .return
+    jnz         near .return
 
     or          rdi, JSIMD_AVX512
 
