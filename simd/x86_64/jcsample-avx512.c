@@ -1,14 +1,16 @@
 /*
- * jcsample-avx512.c - chroma downsampling (AVX-512)
+ * jcsample-avx512.c - downsampling (64-bit AVX-512)
  *
- * Copyright (C) 2025, Lakeworks.
+ * Copyright 2009 Pierre Ossman <ossman@cendio.se> for Cendio AB
+ * Copyright (C) 2009, 2016, 2024-2025, D. R. Commander.
+ * Copyright (C) 2015, Intel Corporation.
+ * Copyright (C) 2018, Matthias Räncker.
  *
- * AVX-512BW implementation of chroma downsampling.
- * Processes 128 input pixels → 64 output pixels per iteration.
+ * Based on the x86 SIMD extension for IJG JPEG library
+ * Copyright (C) 1999-2006, MIYASAKA Masaru.
  *
- * Based on the AVX2 NASM implementation:
- * Copyright (C) 2009, 2014-2015, D. R. Commander.
- * Copyright (C) 2015, Matthieu Darbois.
+ * AVX-512BW C intrinsic port of the AVX2 NASM implementation.
+ * Processes 128 input pixels -> 64 output pixels per iteration.
  */
 
 #define JPEG_INTERNALS
