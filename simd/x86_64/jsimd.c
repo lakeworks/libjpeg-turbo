@@ -53,7 +53,7 @@ init_simd(void)
   if (!GETENV_S(env, 2, "JSIMD_FORCESSE2") && !strcmp(env, "1"))
     simd_support &= JSIMD_SSE2;
   if (!GETENV_S(env, 2, "JSIMD_FORCEAVX2") && !strcmp(env, "1"))
-    simd_support &= JSIMD_AVX2;
+    simd_support &= JSIMD_AVX2 | JSIMD_SSE2;
   if (!GETENV_S(env, 2, "JSIMD_FORCEAVX512") && !strcmp(env, "1"))
     simd_support &= JSIMD_AVX512 | JSIMD_AVX2 | JSIMD_SSE2;
   if (!GETENV_S(env, 2, "JSIMD_FORCENONE") && !strcmp(env, "1"))
