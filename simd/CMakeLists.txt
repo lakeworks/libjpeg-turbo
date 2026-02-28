@@ -137,22 +137,6 @@ if(CPU_TYPE STREQUAL "x86_64")
     x86_64/jdcolor-avx2.asm x86_64/jdmerge-avx2.asm x86_64/jdsample-avx2.asm
     x86_64/jfdctint-avx2.asm x86_64/jidctint-avx2.asm x86_64/jquanti-avx2.asm)
 
-  # AVX-512 implementations (C intrinsics)
-  # Only upsample, downsample, and quantize benefit from 512-bit width on Zen 5.
-  # Color convert, DCT, IDCT, merged upsample fall back to AVX2 NASM.
-  set(AVX512_SOURCES
-    x86_64/jquanti-avx512.c x86_64/jcsample-avx512.c
-    x86_64/jdsample-avx512.c)
-
-  if(MSVC)
-    set_source_files_properties(${AVX512_SOURCES} PROPERTIES
-      COMPILE_FLAGS "/arch:AVX512")
-  else()
-    set_source_files_properties(${AVX512_SOURCES} PROPERTIES
-      COMPILE_FLAGS "-mavx512bw -mavx512vl -mavx512vbmi")
-  endif()
-
-  list(APPEND SIMD_SOURCES ${AVX512_SOURCES})
 else()
   set(SIMD_SOURCES i386/jsimdcpu.asm i386/jfdctflt-3dn.asm
     i386/jidctflt-3dn.asm i386/jquant-3dn.asm
@@ -184,17 +168,17 @@ file(GLOB INC_FILES nasm/*.inc)
 
 foreach(file ${SIMD_SOURCES})
   set(OBJECT_DEPENDS "")
-  if(${file} MATCHES jccolor AND NOT ${file} MATCHES "avx512")
+  if(${file} MATCHES jccolor)
     string(REGEX REPLACE "jccolor" "jccolext" DEPFILE ${file})
     set(OBJECT_DEPENDS ${OBJECT_DEPENDS}
       ${CMAKE_CURRENT_SOURCE_DIR}/${DEPFILE})
   endif()
-  if(${file} MATCHES jcgray AND NOT ${file} MATCHES "avx512")
+  if(${file} MATCHES jcgray)
     string(REGEX REPLACE "jcgray" "jcgryext" DEPFILE ${file})
     set(OBJECT_DEPENDS ${OBJECT_DEPENDS}
       ${CMAKE_CURRENT_SOURCE_DIR}/${DEPFILE})
   endif()
-  if(${file} MATCHES jdcolor AND NOT ${file} MATCHES "avx512")
+  if(${file} MATCHES jdcolor)
     string(REGEX REPLACE "jdcolor" "jdcolext" DEPFILE ${file})
     set(OBJECT_DEPENDS ${OBJECT_DEPENDS}
       ${CMAKE_CURRENT_SOURCE_DIR}/${DEPFILE})
