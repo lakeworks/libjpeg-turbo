@@ -43,38 +43,39 @@ jsimd_quantize_avx512(JCOEFPTR coef_block, DCTELEM *divisors,
   DCTELEM *corr  = divisors + 1 * DCTSIZE2;
   DCTELEM *scale = divisors + 2 * DCTSIZE2;
 
-  /* Process all 64 coefficients in 2 ZMM iterations (32 per ZMM) */
+  const __m512i zero = _mm512_setzero_si512();
 
-  /* First 32 coefficients (rows 0-3) */
+  /* Load all data upfront — gives OOO engine maximum scheduling freedom */
   __m512i val0 = _mm512_loadu_si512((__m512i *)(workspace + 0));
-  __m512i rec0 = _mm512_loadu_si512((__m512i *)(recip + 0));
-  __m512i cor0 = _mm512_loadu_si512((__m512i *)(corr + 0));
-  __m512i sca0 = _mm512_loadu_si512((__m512i *)(scale + 0));
-
-  __m512i abs0 = _mm512_abs_epi16(val0);
-  abs0 = _mm512_add_epi16(abs0, cor0);
-  abs0 = _mm512_mulhi_epu16(abs0, rec0);
-  abs0 = _mm512_mulhi_epu16(abs0, sca0);
-  /* Restore sign: negate where original was negative, zero where zero */
-  __mmask32 neg0 = _mm512_cmpgt_epi16_mask(_mm512_setzero_si512(), val0);
-  __m512i res0 = _mm512_mask_sub_epi16(abs0, neg0,
-                                       _mm512_setzero_si512(), abs0);
-
-  _mm512_storeu_si512((__m512i *)(coef_block + 0), res0);
-
-  /* Second 32 coefficients (rows 4-7) */
   __m512i val1 = _mm512_loadu_si512((__m512i *)(workspace + 32));
+  __m512i rec0 = _mm512_loadu_si512((__m512i *)(recip + 0));
   __m512i rec1 = _mm512_loadu_si512((__m512i *)(recip + 32));
+  __m512i cor0 = _mm512_loadu_si512((__m512i *)(corr + 0));
   __m512i cor1 = _mm512_loadu_si512((__m512i *)(corr + 32));
+  __m512i sca0 = _mm512_loadu_si512((__m512i *)(scale + 0));
   __m512i sca1 = _mm512_loadu_si512((__m512i *)(scale + 32));
 
+  /* Interleave half0/half1 computation to hide mulhi_epu16 5-cycle latency.
+   * While half0's multiply retires, half1's instructions fill the pipeline. */
+  __m512i abs0 = _mm512_abs_epi16(val0);
   __m512i abs1 = _mm512_abs_epi16(val1);
-  abs1 = _mm512_add_epi16(abs1, cor1);
-  abs1 = _mm512_mulhi_epu16(abs1, rec1);
-  abs1 = _mm512_mulhi_epu16(abs1, sca1);
-  __mmask32 neg1 = _mm512_cmpgt_epi16_mask(_mm512_setzero_si512(), val1);
-  __m512i res1 = _mm512_mask_sub_epi16(abs1, neg1,
-                                       _mm512_setzero_si512(), abs1);
 
+  abs0 = _mm512_add_epi16(abs0, cor0);
+  abs1 = _mm512_add_epi16(abs1, cor1);
+
+  abs0 = _mm512_mulhi_epu16(abs0, rec0);   /* 5c latency — half1 fills gap */
+  abs1 = _mm512_mulhi_epu16(abs1, rec1);
+
+  abs0 = _mm512_mulhi_epu16(abs0, sca0);   /* 5c latency */
+  abs1 = _mm512_mulhi_epu16(abs1, sca1);
+
+  /* Restore sign: negate where original was negative */
+  __mmask32 neg0 = _mm512_cmpgt_epi16_mask(zero, val0);
+  __mmask32 neg1 = _mm512_cmpgt_epi16_mask(zero, val1);
+
+  __m512i res0 = _mm512_mask_sub_epi16(abs0, neg0, zero, abs0);
+  __m512i res1 = _mm512_mask_sub_epi16(abs1, neg1, zero, abs1);
+
+  _mm512_storeu_si512((__m512i *)(coef_block + 0), res0);
   _mm512_storeu_si512((__m512i *)(coef_block + 32), res1);
 }

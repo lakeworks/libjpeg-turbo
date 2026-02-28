@@ -33,8 +33,10 @@ jsimd_h2v1_downsample_avx512(JDIMENSION image_width, int max_v_samp_factor,
                               JSAMPARRAY input_data, JSAMPARRAY output_data)
 {
   JDIMENSION output_cols = width_in_blocks * DCTSIZE;  /* 8 * blocks */
-  __m512i mask_even = _mm512_set1_epi16(0x00FF);
-  __m512i bias = _mm512_set1_epi16(1);  /* rounding bias */
+  const __m512i mask_even = _mm512_set1_epi16(0x00FF);
+  const __m512i bias = _mm512_set1_epi16(1);  /* rounding bias */
+  /* packus interleaves 128-bit lanes — fix with lane permute (hoisted) */
+  const __m512i pack_perm = _mm512_setr_epi64(0, 2, 4, 6, 1, 3, 5, 7);
 
   for (int outrow = 0; outrow < (int)v_samp_factor; outrow++) {
     JSAMPROW inptr = input_data[outrow];
@@ -64,14 +66,12 @@ jsimd_h2v1_downsample_avx512(JDIMENSION image_width, int max_v_samp_factor,
 
       /* Pack 16-bit results back to 8-bit */
       __m512i result = _mm512_packus_epi16(sum0, sum1);
-      /* packus interleaves 128-bit lanes, need to fix ordering */
-      result = _mm512_permutexvar_epi64(
-        _mm512_setr_epi64(0, 2, 4, 6, 1, 3, 5, 7), result);
+      result = _mm512_permutexvar_epi64(pack_perm, result);
 
       _mm512_storeu_si512((__m512i *)(outptr + outcol), result);
     }
 
-    /* Handle remaining columns with AVX2/scalar */
+    /* Handle remaining columns with scalar */
     for (; outcol < output_cols; outcol++) {
       int in_off = outcol * 2;
       int val = (int)inptr[in_off] + (int)inptr[in_off + 1] + 1;
@@ -92,8 +92,9 @@ jsimd_h2v2_downsample_avx512(JDIMENSION image_width, int max_v_samp_factor,
                               JSAMPARRAY input_data, JSAMPARRAY output_data)
 {
   JDIMENSION output_cols = width_in_blocks * DCTSIZE;
-  __m512i mask_even = _mm512_set1_epi16(0x00FF);
-  __m512i bias = _mm512_set1_epi16(2);  /* rounding bias for /4 */
+  const __m512i mask_even = _mm512_set1_epi16(0x00FF);
+  const __m512i bias = _mm512_set1_epi16(2);  /* rounding bias for /4 */
+  const __m512i pack_perm = _mm512_setr_epi64(0, 2, 4, 6, 1, 3, 5, 7);
 
   for (int outrow = 0; outrow < (int)v_samp_factor; outrow++) {
     JSAMPROW inptr0 = input_data[outrow * 2];
@@ -136,8 +137,7 @@ jsimd_h2v2_downsample_avx512(JDIMENSION image_width, int max_v_samp_factor,
 
       /* Pack back to 8-bit */
       __m512i result = _mm512_packus_epi16(sum0, sum1);
-      result = _mm512_permutexvar_epi64(
-        _mm512_setr_epi64(0, 2, 4, 6, 1, 3, 5, 7), result);
+      result = _mm512_permutexvar_epi64(pack_perm, result);
 
       _mm512_storeu_si512((__m512i *)(outptr + outcol), result);
     }
