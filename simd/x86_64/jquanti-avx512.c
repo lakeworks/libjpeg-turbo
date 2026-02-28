@@ -1,15 +1,17 @@
 /*
- * jquanti-avx512.c - quantization (AVX-512)
+ * jquanti-avx512.c - sample data conversion and quantization (64-bit AVX-512)
  *
- * Copyright (C) 2025, Lakeworks.
- *
- * AVX-512BW implementation of quantization.
- * Processes the entire 64-coefficient DCT block in 2 ZMM loads instead of 4
- * YMM loads.
- *
- * Based on the AVX2 NASM implementation:
- * Copyright (C) 2016, D. R. Commander.
+ * Copyright 2009 Pierre Ossman <ossman@cendio.se> for Cendio AB
+ * Copyright (C) 2009, 2016, 2018, 2024-2025, D. R. Commander.
  * Copyright (C) 2016, Matthieu Darbois.
+ * Copyright (C) 2018, Matthias Räncker.
+ *
+ * Based on the x86 SIMD extension for IJG JPEG library
+ * Copyright (C) 1999-2006, MIYASAKA Masaru.
+ *
+ * AVX-512BW C intrinsic port of the AVX2 NASM implementation.
+ * Processes the entire 64-coefficient DCT block in 2 ZMM loads
+ * instead of 4 YMM loads.
  */
 
 #define JPEG_INTERNALS

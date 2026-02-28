@@ -1,15 +1,18 @@
 /*
- * jdsample-avx512.c - chroma upsampling (AVX-512 VBMI)
+ * jdsample-avx512.c - upsampling (64-bit AVX-512 VBMI)
  *
- * Copyright (C) 2025, Lakeworks.
+ * Copyright 2009 Pierre Ossman <ossman@cendio.se> for Cendio AB
+ * Copyright (C) 2009, 2016, 2024-2025, D. R. Commander.
+ * Copyright (C) 2015, Intel Corporation.
+ * Copyright (C) 2018, Matthias Räncker.
+ * Copyright (C) 2023, Aliaksiej Kandracienka.
  *
- * AVX-512BW+VBMI implementation of chroma upsampling (simple box filter).
- * Uses vpermb (VBMI) for single-instruction byte duplication:
- *   64 input bytes → 128 output bytes per iteration (2 vpermb).
+ * Based on the x86 SIMD extension for IJG JPEG library
+ * Copyright (C) 1999-2006, MIYASAKA Masaru.
  *
- * Based on the AVX2 NASM implementation:
- * Copyright (C) 2009, 2014-2015, D. R. Commander.
- * Copyright (C) 2015, Matthieu Darbois.
+ * AVX-512BW+VBMI C intrinsic port of the AVX2 NASM implementation.
+ * Uses vpermb for single-instruction byte duplication:
+ *   64 input bytes -> 128 output bytes per iteration (2 vpermb).
  */
 
 #define JPEG_INTERNALS
@@ -20,12 +23,12 @@
 
 #include <immintrin.h>
 
-/* Build marker — detectable via: strings php8ts.dll | findstr LAKEWORKS
+/* Build marker — detectable via: strings php8ts.dll | findstr AVX512
  * or from PHP userland: see tools/verify-jpeg-simd.php
  * volatile prevents dead-code elimination of this unreferenced string.
  */
 static volatile const char jsimd_avx512_build_id[] =
-  "LAKEWORKS_LIBJPEG_TURBO_AVX512_ZEN5_V1";
+  "LIBJPEG_TURBO_AVX512_FORK_V1";
 
 /*
  * Upsample (simple box filter) for 2:1 horizontal, 1:1 vertical.
