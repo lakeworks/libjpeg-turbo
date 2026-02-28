@@ -25,7 +25,6 @@
 #define JSIMD_ALTIVEC  0x40
 #define JSIMD_AVX2     0x80
 #define JSIMD_MMI      0x100
-#define JSIMD_AVX512   0x200
 
 /* Need c_derived_tbl and UJCOEF for Huffman function declarations below */
 #include "../src/jchuff.h"
@@ -269,8 +268,6 @@ EXTERN(void) jsimd_extxbgr_gray_convert_avx2
 EXTERN(void) jsimd_extxrgb_gray_convert_avx2
   (JDIMENSION img_width, JSAMPARRAY input_buf, JSAMPIMAGE output_buf,
    JDIMENSION output_row, int num_rows);
-
-/* TODO: jcgray-avx512.c not yet implemented -- falls through to AVX2 */
 
 EXTERN(void) jsimd_rgb_gray_convert_neon
   (JDIMENSION img_width, JSAMPARRAY input_buf, JSAMPIMAGE output_buf,
@@ -549,10 +546,6 @@ EXTERN(void) jsimd_h2v1_downsample_avx2
   (JDIMENSION image_width, int max_v_samp_factor, JDIMENSION v_samp_factor,
    JDIMENSION width_in_blocks, JSAMPARRAY input_data, JSAMPARRAY output_data);
 
-EXTERN(void) jsimd_h2v1_downsample_avx512
-  (JDIMENSION image_width, int max_v_samp_factor, JDIMENSION v_samp_factor,
-   JDIMENSION width_in_blocks, JSAMPARRAY input_data, JSAMPARRAY output_data);
-
 EXTERN(void) jsimd_h2v1_downsample_neon
   (JDIMENSION image_width, int max_v_samp_factor, JDIMENSION v_samp_factor,
    JDIMENSION width_in_blocks, JSAMPARRAY input_data, JSAMPARRAY output_data);
@@ -575,10 +568,6 @@ EXTERN(void) jsimd_h2v2_downsample_sse2
    JDIMENSION width_in_blocks, JSAMPARRAY input_data, JSAMPARRAY output_data);
 
 EXTERN(void) jsimd_h2v2_downsample_avx2
-  (JDIMENSION image_width, int max_v_samp_factor, JDIMENSION v_samp_factor,
-   JDIMENSION width_in_blocks, JSAMPARRAY input_data, JSAMPARRAY output_data);
-
-EXTERN(void) jsimd_h2v2_downsample_avx512
   (JDIMENSION image_width, int max_v_samp_factor, JDIMENSION v_samp_factor,
    JDIMENSION width_in_blocks, JSAMPARRAY input_data, JSAMPARRAY output_data);
 
@@ -624,13 +613,6 @@ EXTERN(void) jsimd_h2v1_upsample_avx2
   (int max_v_samp_factor, JDIMENSION output_width, JSAMPARRAY input_data,
    JSAMPARRAY *output_data_ptr);
 EXTERN(void) jsimd_h2v2_upsample_avx2
-  (int max_v_samp_factor, JDIMENSION output_width, JSAMPARRAY input_data,
-   JSAMPARRAY *output_data_ptr);
-
-EXTERN(void) jsimd_h2v1_upsample_avx512
-  (int max_v_samp_factor, JDIMENSION output_width, JSAMPARRAY input_data,
-   JSAMPARRAY *output_data_ptr);
-EXTERN(void) jsimd_h2v2_upsample_avx512
   (int max_v_samp_factor, JDIMENSION output_width, JSAMPARRAY input_data,
    JSAMPARRAY *output_data_ptr);
 
@@ -1103,9 +1085,6 @@ EXTERN(void) jsimd_quantize_sse2
   (JCOEFPTR coef_block, DCTELEM *divisors, DCTELEM *workspace);
 
 EXTERN(void) jsimd_quantize_avx2
-  (JCOEFPTR coef_block, DCTELEM *divisors, DCTELEM *workspace);
-
-EXTERN(void) jsimd_quantize_avx512
   (JCOEFPTR coef_block, DCTELEM *divisors, DCTELEM *workspace);
 
 EXTERN(void) jsimd_quantize_neon
