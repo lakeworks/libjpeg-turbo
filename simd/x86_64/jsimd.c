@@ -76,8 +76,6 @@ jsimd_can_rgb_ycc(void)
   if ((RGB_PIXELSIZE != 3) && (RGB_PIXELSIZE != 4))
     return 0;
 
-  if (simd_support & JSIMD_AVX512)
-    return 1;
   if ((simd_support & JSIMD_AVX2) &&
       IS_ALIGNED_AVX(jconst_rgb_ycc_convert_avx2))
     return 1;
@@ -124,8 +122,6 @@ jsimd_can_ycc_rgb(void)
   if ((RGB_PIXELSIZE != 3) && (RGB_PIXELSIZE != 4))
     return 0;
 
-  if (simd_support & JSIMD_AVX512)
-    return 1;
   if ((simd_support & JSIMD_AVX2) &&
       IS_ALIGNED_AVX(jconst_ycc_rgb_convert_avx2))
     return 1;
@@ -147,7 +143,6 @@ jsimd_rgb_ycc_convert(j_compress_ptr cinfo, JSAMPARRAY input_buf,
                       JSAMPIMAGE output_buf, JDIMENSION output_row,
                       int num_rows)
 {
-  void (*avx512fct) (JDIMENSION, JSAMPARRAY, JSAMPIMAGE, JDIMENSION, int);
   void (*avx2fct) (JDIMENSION, JSAMPARRAY, JSAMPIMAGE, JDIMENSION, int);
   void (*sse2fct) (JDIMENSION, JSAMPARRAY, JSAMPIMAGE, JDIMENSION, int);
 
@@ -156,49 +151,40 @@ jsimd_rgb_ycc_convert(j_compress_ptr cinfo, JSAMPARRAY input_buf,
 
   switch (cinfo->in_color_space) {
   case JCS_EXT_RGB:
-    avx512fct = jsimd_extrgb_ycc_convert_avx512;
     avx2fct = jsimd_extrgb_ycc_convert_avx2;
     sse2fct = jsimd_extrgb_ycc_convert_sse2;
     break;
   case JCS_EXT_RGBX:
   case JCS_EXT_RGBA:
-    avx512fct = jsimd_extrgbx_ycc_convert_avx512;
     avx2fct = jsimd_extrgbx_ycc_convert_avx2;
     sse2fct = jsimd_extrgbx_ycc_convert_sse2;
     break;
   case JCS_EXT_BGR:
-    avx512fct = jsimd_extbgr_ycc_convert_avx512;
     avx2fct = jsimd_extbgr_ycc_convert_avx2;
     sse2fct = jsimd_extbgr_ycc_convert_sse2;
     break;
   case JCS_EXT_BGRX:
   case JCS_EXT_BGRA:
-    avx512fct = jsimd_extbgrx_ycc_convert_avx512;
     avx2fct = jsimd_extbgrx_ycc_convert_avx2;
     sse2fct = jsimd_extbgrx_ycc_convert_sse2;
     break;
   case JCS_EXT_XBGR:
   case JCS_EXT_ABGR:
-    avx512fct = jsimd_extxbgr_ycc_convert_avx512;
     avx2fct = jsimd_extxbgr_ycc_convert_avx2;
     sse2fct = jsimd_extxbgr_ycc_convert_sse2;
     break;
   case JCS_EXT_XRGB:
   case JCS_EXT_ARGB:
-    avx512fct = jsimd_extxrgb_ycc_convert_avx512;
     avx2fct = jsimd_extxrgb_ycc_convert_avx2;
     sse2fct = jsimd_extxrgb_ycc_convert_sse2;
     break;
   default:
-    avx512fct = jsimd_rgb_ycc_convert_avx512;
     avx2fct = jsimd_rgb_ycc_convert_avx2;
     sse2fct = jsimd_rgb_ycc_convert_sse2;
     break;
   }
 
-  if (simd_support & JSIMD_AVX512)
-    avx512fct(cinfo->image_width, input_buf, output_buf, output_row, num_rows);
-  else if (simd_support & JSIMD_AVX2)
+  if (simd_support & JSIMD_AVX2)
     avx2fct(cinfo->image_width, input_buf, output_buf, output_row, num_rows);
   else
     sse2fct(cinfo->image_width, input_buf, output_buf, output_row, num_rows);
@@ -263,7 +249,6 @@ jsimd_ycc_rgb_convert(j_decompress_ptr cinfo, JSAMPIMAGE input_buf,
                       JDIMENSION input_row, JSAMPARRAY output_buf,
                       int num_rows)
 {
-  void (*avx512fct) (JDIMENSION, JSAMPIMAGE, JDIMENSION, JSAMPARRAY, int);
   void (*avx2fct) (JDIMENSION, JSAMPIMAGE, JDIMENSION, JSAMPARRAY, int);
   void (*sse2fct) (JDIMENSION, JSAMPIMAGE, JDIMENSION, JSAMPARRAY, int);
 
@@ -272,49 +257,40 @@ jsimd_ycc_rgb_convert(j_decompress_ptr cinfo, JSAMPIMAGE input_buf,
 
   switch (cinfo->out_color_space) {
   case JCS_EXT_RGB:
-    avx512fct = jsimd_ycc_extrgb_convert_avx512;
     avx2fct = jsimd_ycc_extrgb_convert_avx2;
     sse2fct = jsimd_ycc_extrgb_convert_sse2;
     break;
   case JCS_EXT_RGBX:
   case JCS_EXT_RGBA:
-    avx512fct = jsimd_ycc_extrgbx_convert_avx512;
     avx2fct = jsimd_ycc_extrgbx_convert_avx2;
     sse2fct = jsimd_ycc_extrgbx_convert_sse2;
     break;
   case JCS_EXT_BGR:
-    avx512fct = jsimd_ycc_extbgr_convert_avx512;
     avx2fct = jsimd_ycc_extbgr_convert_avx2;
     sse2fct = jsimd_ycc_extbgr_convert_sse2;
     break;
   case JCS_EXT_BGRX:
   case JCS_EXT_BGRA:
-    avx512fct = jsimd_ycc_extbgrx_convert_avx512;
     avx2fct = jsimd_ycc_extbgrx_convert_avx2;
     sse2fct = jsimd_ycc_extbgrx_convert_sse2;
     break;
   case JCS_EXT_XBGR:
   case JCS_EXT_ABGR:
-    avx512fct = jsimd_ycc_extxbgr_convert_avx512;
     avx2fct = jsimd_ycc_extxbgr_convert_avx2;
     sse2fct = jsimd_ycc_extxbgr_convert_sse2;
     break;
   case JCS_EXT_XRGB:
   case JCS_EXT_ARGB:
-    avx512fct = jsimd_ycc_extxrgb_convert_avx512;
     avx2fct = jsimd_ycc_extxrgb_convert_avx2;
     sse2fct = jsimd_ycc_extxrgb_convert_sse2;
     break;
   default:
-    avx512fct = jsimd_ycc_rgb_convert_avx512;
     avx2fct = jsimd_ycc_rgb_convert_avx2;
     sse2fct = jsimd_ycc_rgb_convert_sse2;
     break;
   }
 
-  if (simd_support & JSIMD_AVX512)
-    avx512fct(cinfo->output_width, input_buf, input_row, output_buf, num_rows);
-  else if (simd_support & JSIMD_AVX2)
+  if (simd_support & JSIMD_AVX2)
     avx2fct(cinfo->output_width, input_buf, input_row, output_buf, num_rows);
   else
     sse2fct(cinfo->output_width, input_buf, input_row, output_buf, num_rows);
@@ -582,8 +558,6 @@ jsimd_can_h2v2_merged_upsample(void)
   if (sizeof(JDIMENSION) != 4)
     return 0;
 
-  if (simd_support & JSIMD_AVX512)
-    return 1;
   if ((simd_support & JSIMD_AVX2) &&
       IS_ALIGNED_AVX(jconst_merged_upsample_avx2))
     return 1;
@@ -605,8 +579,6 @@ jsimd_can_h2v1_merged_upsample(void)
   if (sizeof(JDIMENSION) != 4)
     return 0;
 
-  if (simd_support & JSIMD_AVX512)
-    return 1;
   if ((simd_support & JSIMD_AVX2) &&
       IS_ALIGNED_AVX(jconst_merged_upsample_avx2))
     return 1;
@@ -621,7 +593,6 @@ GLOBAL(void)
 jsimd_h2v2_merged_upsample(j_decompress_ptr cinfo, JSAMPIMAGE input_buf,
                            JDIMENSION in_row_group_ctr, JSAMPARRAY output_buf)
 {
-  void (*avx512fct) (JDIMENSION, JSAMPIMAGE, JDIMENSION, JSAMPARRAY);
   void (*avx2fct) (JDIMENSION, JSAMPIMAGE, JDIMENSION, JSAMPARRAY);
   void (*sse2fct) (JDIMENSION, JSAMPIMAGE, JDIMENSION, JSAMPARRAY);
 
@@ -630,49 +601,40 @@ jsimd_h2v2_merged_upsample(j_decompress_ptr cinfo, JSAMPIMAGE input_buf,
 
   switch (cinfo->out_color_space) {
   case JCS_EXT_RGB:
-    avx512fct = jsimd_h2v2_extrgb_merged_upsample_avx512;
     avx2fct = jsimd_h2v2_extrgb_merged_upsample_avx2;
     sse2fct = jsimd_h2v2_extrgb_merged_upsample_sse2;
     break;
   case JCS_EXT_RGBX:
   case JCS_EXT_RGBA:
-    avx512fct = jsimd_h2v2_extrgbx_merged_upsample_avx512;
     avx2fct = jsimd_h2v2_extrgbx_merged_upsample_avx2;
     sse2fct = jsimd_h2v2_extrgbx_merged_upsample_sse2;
     break;
   case JCS_EXT_BGR:
-    avx512fct = jsimd_h2v2_extbgr_merged_upsample_avx512;
     avx2fct = jsimd_h2v2_extbgr_merged_upsample_avx2;
     sse2fct = jsimd_h2v2_extbgr_merged_upsample_sse2;
     break;
   case JCS_EXT_BGRX:
   case JCS_EXT_BGRA:
-    avx512fct = jsimd_h2v2_extbgrx_merged_upsample_avx512;
     avx2fct = jsimd_h2v2_extbgrx_merged_upsample_avx2;
     sse2fct = jsimd_h2v2_extbgrx_merged_upsample_sse2;
     break;
   case JCS_EXT_XBGR:
   case JCS_EXT_ABGR:
-    avx512fct = jsimd_h2v2_extxbgr_merged_upsample_avx512;
     avx2fct = jsimd_h2v2_extxbgr_merged_upsample_avx2;
     sse2fct = jsimd_h2v2_extxbgr_merged_upsample_sse2;
     break;
   case JCS_EXT_XRGB:
   case JCS_EXT_ARGB:
-    avx512fct = jsimd_h2v2_extxrgb_merged_upsample_avx512;
     avx2fct = jsimd_h2v2_extxrgb_merged_upsample_avx2;
     sse2fct = jsimd_h2v2_extxrgb_merged_upsample_sse2;
     break;
   default:
-    avx512fct = jsimd_h2v2_merged_upsample_avx512;
     avx2fct = jsimd_h2v2_merged_upsample_avx2;
     sse2fct = jsimd_h2v2_merged_upsample_sse2;
     break;
   }
 
-  if (simd_support & JSIMD_AVX512)
-    avx512fct(cinfo->output_width, input_buf, in_row_group_ctr, output_buf);
-  else if (simd_support & JSIMD_AVX2)
+  if (simd_support & JSIMD_AVX2)
     avx2fct(cinfo->output_width, input_buf, in_row_group_ctr, output_buf);
   else
     sse2fct(cinfo->output_width, input_buf, in_row_group_ctr, output_buf);
@@ -682,7 +644,6 @@ GLOBAL(void)
 jsimd_h2v1_merged_upsample(j_decompress_ptr cinfo, JSAMPIMAGE input_buf,
                            JDIMENSION in_row_group_ctr, JSAMPARRAY output_buf)
 {
-  void (*avx512fct) (JDIMENSION, JSAMPIMAGE, JDIMENSION, JSAMPARRAY);
   void (*avx2fct) (JDIMENSION, JSAMPIMAGE, JDIMENSION, JSAMPARRAY);
   void (*sse2fct) (JDIMENSION, JSAMPIMAGE, JDIMENSION, JSAMPARRAY);
 
@@ -691,49 +652,40 @@ jsimd_h2v1_merged_upsample(j_decompress_ptr cinfo, JSAMPIMAGE input_buf,
 
   switch (cinfo->out_color_space) {
   case JCS_EXT_RGB:
-    avx512fct = jsimd_h2v1_extrgb_merged_upsample_avx512;
     avx2fct = jsimd_h2v1_extrgb_merged_upsample_avx2;
     sse2fct = jsimd_h2v1_extrgb_merged_upsample_sse2;
     break;
   case JCS_EXT_RGBX:
   case JCS_EXT_RGBA:
-    avx512fct = jsimd_h2v1_extrgbx_merged_upsample_avx512;
     avx2fct = jsimd_h2v1_extrgbx_merged_upsample_avx2;
     sse2fct = jsimd_h2v1_extrgbx_merged_upsample_sse2;
     break;
   case JCS_EXT_BGR:
-    avx512fct = jsimd_h2v1_extbgr_merged_upsample_avx512;
     avx2fct = jsimd_h2v1_extbgr_merged_upsample_avx2;
     sse2fct = jsimd_h2v1_extbgr_merged_upsample_sse2;
     break;
   case JCS_EXT_BGRX:
   case JCS_EXT_BGRA:
-    avx512fct = jsimd_h2v1_extbgrx_merged_upsample_avx512;
     avx2fct = jsimd_h2v1_extbgrx_merged_upsample_avx2;
     sse2fct = jsimd_h2v1_extbgrx_merged_upsample_sse2;
     break;
   case JCS_EXT_XBGR:
   case JCS_EXT_ABGR:
-    avx512fct = jsimd_h2v1_extxbgr_merged_upsample_avx512;
     avx2fct = jsimd_h2v1_extxbgr_merged_upsample_avx2;
     sse2fct = jsimd_h2v1_extxbgr_merged_upsample_sse2;
     break;
   case JCS_EXT_XRGB:
   case JCS_EXT_ARGB:
-    avx512fct = jsimd_h2v1_extxrgb_merged_upsample_avx512;
     avx2fct = jsimd_h2v1_extxrgb_merged_upsample_avx2;
     sse2fct = jsimd_h2v1_extxrgb_merged_upsample_sse2;
     break;
   default:
-    avx512fct = jsimd_h2v1_merged_upsample_avx512;
     avx2fct = jsimd_h2v1_merged_upsample_avx2;
     sse2fct = jsimd_h2v1_merged_upsample_sse2;
     break;
   }
 
-  if (simd_support & JSIMD_AVX512)
-    avx512fct(cinfo->output_width, input_buf, in_row_group_ctr, output_buf);
-  else if (simd_support & JSIMD_AVX2)
+  if (simd_support & JSIMD_AVX2)
     avx2fct(cinfo->output_width, input_buf, in_row_group_ctr, output_buf);
   else
     sse2fct(cinfo->output_width, input_buf, in_row_group_ctr, output_buf);
@@ -754,8 +706,6 @@ jsimd_can_convsamp(void)
   if (sizeof(DCTELEM) != 2)
     return 0;
 
-  if (simd_support & JSIMD_AVX512)
-    return 1;
   if (simd_support & JSIMD_AVX2)
     return 1;
   if (simd_support & JSIMD_SSE2)
@@ -792,9 +742,7 @@ jsimd_convsamp(JSAMPARRAY sample_data, JDIMENSION start_col,
   if (simd_support == ~0U)
     init_simd();
 
-  if (simd_support & JSIMD_AVX512)
-    jsimd_convsamp_avx512(sample_data, start_col, workspace);
-  else if (simd_support & JSIMD_AVX2)
+  if (simd_support & JSIMD_AVX2)
     jsimd_convsamp_avx2(sample_data, start_col, workspace);
   else
     jsimd_convsamp_sse2(sample_data, start_col, workspace);
@@ -818,8 +766,6 @@ jsimd_can_fdct_islow(void)
   if (sizeof(DCTELEM) != 2)
     return 0;
 
-  if (simd_support & JSIMD_AVX512)
-    return 1;
   if ((simd_support & JSIMD_AVX2) && IS_ALIGNED_AVX(jconst_fdct_islow_avx2))
     return 1;
   if ((simd_support & JSIMD_SSE2) && IS_ALIGNED_SSE(jconst_fdct_islow_sse2))
@@ -868,9 +814,7 @@ jsimd_fdct_islow(DCTELEM *data)
   if (simd_support == ~0U)
     init_simd();
 
-  if (simd_support & JSIMD_AVX512)
-    jsimd_fdct_islow_avx512(data);
-  else if (simd_support & JSIMD_AVX2)
+  if (simd_support & JSIMD_AVX2)
     jsimd_fdct_islow_avx2(data);
   else
     jsimd_fdct_islow_sse2(data);
@@ -1030,8 +974,6 @@ jsimd_can_idct_islow(void)
   if (sizeof(ISLOW_MULT_TYPE) != 2)
     return 0;
 
-  if (simd_support & JSIMD_AVX512)
-    return 1;
   if ((simd_support & JSIMD_AVX2) && IS_ALIGNED_AVX(jconst_idct_islow_avx2))
     return 1;
   if ((simd_support & JSIMD_SSE2) && IS_ALIGNED_SSE(jconst_idct_islow_sse2))
@@ -1097,10 +1039,7 @@ jsimd_idct_islow(j_decompress_ptr cinfo, jpeg_component_info *compptr,
   if (simd_support == ~0U)
     init_simd();
 
-  if (simd_support & JSIMD_AVX512)
-    jsimd_idct_islow_avx512(compptr->dct_table, coef_block, output_buf,
-                            output_col);
-  else if (simd_support & JSIMD_AVX2)
+  if (simd_support & JSIMD_AVX2)
     jsimd_idct_islow_avx2(compptr->dct_table, coef_block, output_buf,
                           output_col);
   else
