@@ -19,6 +19,12 @@
 
 #include <immintrin.h>
 
+/* Build marker — detectable via: strings php8ts.dll | findstr LAKEWORKS
+ * or from PHP: php -r "echo bin2hex(file_get_contents('php8ts.dll'));" | findstr pattern
+ */
+const char jsimd_avx512_build_id[] =
+  "LAKEWORKS_LIBJPEG_TURBO_AVX512_ZEN5_V1";
+
 /*
  * Upsample (simple box filter) for 2:1 horizontal, 1:1 vertical.
  * Each input pixel is duplicated to produce two output pixels.
