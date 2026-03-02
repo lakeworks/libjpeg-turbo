@@ -1,3 +1,38 @@
+Fork: lakeworks/libjpeg-turbo
+=============================
+
+This is a minimal fork of [libjpeg-turbo](https://github.com/libjpeg-turbo/libjpeg-turbo) **3.1.3** used by [lakeworks/php-builds](https://github.com/lakeworks/php-builds) — PGO-optimized PHP for Windows x64 with AVX-512.
+
+### Why this fork exists
+
+The official PHP Windows dependency server ([windows.php.net](https://windows.php.net)) has been frozen since December 2025 and ships **libjpeg-turbo 2.1.0** (May 2021). This fork keeps PHP builds on a current, security-patched version.
+
+### Security fixes since stock PHP deps (2.1.0 → 3.1.3)
+
+| Version | Fix |
+|---------|-----|
+| **3.0.0** | **CVE-2023-2804** — buffer overruns decompressing malformed 12-bit/16-bit lossless JPEG images |
+| **3.0.4** | Exponential CPU growth in default marker processor (DoS); segfault with malformed JPEG in buffered-image mode |
+| **3.1.1** | **CVE-2025-50165** — 12-bit precision crash affecting Windows Imaging Component; API hardening against erroneous `data_precision` changes |
+| **3.1.3** | TurboJPEG API hardened against zero-sized destination buffers, signed integer overflow with large offsets (Java API) |
+| **3.1.4** | Division-by-zero with `jpegtran -drop` on malformed images; potential double-free in TurboJPEG destination buffer handling |
+
+### Branch: `avx2-only`
+
+Active branch for PHP builds. Changes from upstream 3.1.3:
+
+- **AVX-512 SIMD files removed** — benchmarks on AMD Zen 5 showed zero benefit over hand-tuned AVX2 NASM assembly. Reduces `.lib` size by ~260 KB.
+- **FORCEAVX2 dispatch fix** — SSE2 capability bit was missing when AVX2 was force-enabled, breaking tjbench SIMD mode comparison.
+- **Built with `/GL /MT /Ox`** (MSVC LTCG) — enables cross-module inlining at PHP link time. Compiled with `WITH_JPEG8=ON` to match PHP's libjpeg v8 API.
+
+### Performance note
+
+JPEG encode/decode performance is **flat** between stock PHP 8.3.27 (libjpeg-turbo 2.1.0) and custom PHP 8.3.30 (3.1.3). The hot paths are entirely in hand-tuned NASM assembly (AVX2 + SSE2), which is opaque to compiler flags, LTCG, and PGO. The primary value of this fork is **version currency and security**, not throughput.
+
+Direct tjbench results (800x800 q85): AVX2 521 Mpix/s, SSE2 420 Mpix/s (+25%), confirming SIMD dispatch is active.
+
+---
+
 Background
 ==========
 
@@ -368,8 +403,11 @@ Memory Debugger Pitfalls
 
 Valgrind and Memory Sanitizer (MSan) can generate false positives
 (specifically, incorrect reports of uninitialized memory accesses) when used
-with libjpeg-turbo's SIMD extensions.  It is generally recommended that the
-SIMD extensions be disabled, either by passing an argument of `-DWITH_SIMD=0`
-to `cmake` when configuring the build or by setting the environment variable
-`JSIMD_FORCENONE` to `1` at run time, when testing libjpeg-turbo with Valgrind,
-MSan, or other memory debuggers.
+with libjpeg-turbo's SIMD extensions.  There are two ways to work around this
+when testing libjpeg-turbo with Valgrind, MSan, or other memory debuggers:
+
+1. Disable the SIMD extensions, either by passing an argument of
+   `-DWITH_SIMD=0` to `cmake` when configuring the build or by setting the
+   environment variable `JSIMD_FORCENONE` to `1` at run time.
+2. Define the `ZERO_BUFFERS` preprocessor macro (for instance, by adding
+   `-DZERO_BUFFERS=1` to `CMAKE_C_FLAGS`.)
