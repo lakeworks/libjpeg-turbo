@@ -28,7 +28,6 @@
 
 #define IS_ALIGNED_SSE(ptr)  (IS_ALIGNED(ptr, 4)) /* 16 byte alignment */
 #define IS_ALIGNED_AVX(ptr)  (IS_ALIGNED(ptr, 5)) /* 32 byte alignment */
-#define IS_ALIGNED_AVX512(ptr)  (IS_ALIGNED(ptr, 6)) /* 64 byte alignment */
 
 static THREAD_LOCAL unsigned int simd_support = (unsigned int)(~0);
 static THREAD_LOCAL unsigned int simd_huffman = 1;
@@ -53,9 +52,7 @@ init_simd(void)
   if (!GETENV_S(env, 2, "JSIMD_FORCESSE2") && !strcmp(env, "1"))
     simd_support &= JSIMD_SSE2;
   if (!GETENV_S(env, 2, "JSIMD_FORCEAVX2") && !strcmp(env, "1"))
-    simd_support &= JSIMD_AVX2;
-  if (!GETENV_S(env, 2, "JSIMD_FORCEAVX512") && !strcmp(env, "1"))
-    simd_support &= JSIMD_AVX512 | JSIMD_AVX2 | JSIMD_SSE2;
+    simd_support &= JSIMD_AVX2 | JSIMD_SSE2;
   if (!GETENV_S(env, 2, "JSIMD_FORCENONE") && !strcmp(env, "1"))
     simd_support = 0;
   if (!GETENV_S(env, 2, "JSIMD_NOHUFFENC") && !strcmp(env, "1"))
@@ -201,8 +198,6 @@ jsimd_rgb_gray_convert(j_compress_ptr cinfo, JSAMPARRAY input_buf,
   if (simd_support == ~0U)
     init_simd();
 
-  /* No AVX-512 implementation yet — fall through to AVX2/SSE2 */
-
   switch (cinfo->in_color_space) {
   case JCS_EXT_RGB:
     avx2fct = jsimd_extrgb_gray_convert_avx2;
@@ -314,8 +309,6 @@ jsimd_can_h2v2_downsample(void)
   if (sizeof(JDIMENSION) != 4)
     return 0;
 
-  if (simd_support & JSIMD_AVX512)
-    return 1;
   if (simd_support & JSIMD_AVX2)
     return 1;
   if (simd_support & JSIMD_SSE2)
@@ -335,8 +328,6 @@ jsimd_can_h2v1_downsample(void)
   if (sizeof(JDIMENSION) != 4)
     return 0;
 
-  if (simd_support & JSIMD_AVX512)
-    return 1;
   if (simd_support & JSIMD_AVX2)
     return 1;
   if (simd_support & JSIMD_SSE2)
@@ -352,12 +343,7 @@ jsimd_h2v2_downsample(j_compress_ptr cinfo, jpeg_component_info *compptr,
   if (simd_support == ~0U)
     init_simd();
 
-  if (simd_support & JSIMD_AVX512)
-    jsimd_h2v2_downsample_avx512(cinfo->image_width, cinfo->max_v_samp_factor,
-                                 compptr->v_samp_factor,
-                                 compptr->width_in_blocks, input_data,
-                                 output_data);
-  else if (simd_support & JSIMD_AVX2)
+  if (simd_support & JSIMD_AVX2)
     jsimd_h2v2_downsample_avx2(cinfo->image_width, cinfo->max_v_samp_factor,
                                compptr->v_samp_factor,
                                compptr->width_in_blocks, input_data,
@@ -376,12 +362,7 @@ jsimd_h2v1_downsample(j_compress_ptr cinfo, jpeg_component_info *compptr,
   if (simd_support == ~0U)
     init_simd();
 
-  if (simd_support & JSIMD_AVX512)
-    jsimd_h2v1_downsample_avx512(cinfo->image_width, cinfo->max_v_samp_factor,
-                                 compptr->v_samp_factor,
-                                 compptr->width_in_blocks, input_data,
-                                 output_data);
-  else if (simd_support & JSIMD_AVX2)
+  if (simd_support & JSIMD_AVX2)
     jsimd_h2v1_downsample_avx2(cinfo->image_width, cinfo->max_v_samp_factor,
                                compptr->v_samp_factor,
                                compptr->width_in_blocks, input_data,
@@ -404,8 +385,6 @@ jsimd_can_h2v2_upsample(void)
   if (sizeof(JDIMENSION) != 4)
     return 0;
 
-  if (simd_support & JSIMD_AVX512)
-    return 1;
   if (simd_support & JSIMD_AVX2)
     return 1;
   if (simd_support & JSIMD_SSE2)
@@ -425,8 +404,6 @@ jsimd_can_h2v1_upsample(void)
   if (sizeof(JDIMENSION) != 4)
     return 0;
 
-  if (simd_support & JSIMD_AVX512)
-    return 1;
   if (simd_support & JSIMD_AVX2)
     return 1;
   if (simd_support & JSIMD_SSE2)
@@ -442,10 +419,7 @@ jsimd_h2v2_upsample(j_decompress_ptr cinfo, jpeg_component_info *compptr,
   if (simd_support == ~0U)
     init_simd();
 
-  if (simd_support & JSIMD_AVX512)
-    jsimd_h2v2_upsample_avx512(cinfo->max_v_samp_factor, cinfo->output_width,
-                               input_data, output_data_ptr);
-  else if (simd_support & JSIMD_AVX2)
+  if (simd_support & JSIMD_AVX2)
     jsimd_h2v2_upsample_avx2(cinfo->max_v_samp_factor, cinfo->output_width,
                              input_data, output_data_ptr);
   else
@@ -460,10 +434,7 @@ jsimd_h2v1_upsample(j_decompress_ptr cinfo, jpeg_component_info *compptr,
   if (simd_support == ~0U)
     init_simd();
 
-  if (simd_support & JSIMD_AVX512)
-    jsimd_h2v1_upsample_avx512(cinfo->max_v_samp_factor, cinfo->output_width,
-                               input_data, output_data_ptr);
-  else if (simd_support & JSIMD_AVX2)
+  if (simd_support & JSIMD_AVX2)
     jsimd_h2v1_upsample_avx2(cinfo->max_v_samp_factor, cinfo->output_width,
                              input_data, output_data_ptr);
   else
@@ -845,8 +816,6 @@ jsimd_can_quantize(void)
   if (sizeof(DCTELEM) != 2)
     return 0;
 
-  if (simd_support & JSIMD_AVX512)
-    return 1;
   if (simd_support & JSIMD_AVX2)
     return 1;
   if (simd_support & JSIMD_SSE2)
@@ -880,9 +849,7 @@ jsimd_quantize(JCOEFPTR coef_block, DCTELEM *divisors, DCTELEM *workspace)
   if (simd_support == ~0U)
     init_simd();
 
-  if (simd_support & JSIMD_AVX512)
-    jsimd_quantize_avx512(coef_block, divisors, workspace);
-  else if (simd_support & JSIMD_AVX2)
+  if (simd_support & JSIMD_AVX2)
     jsimd_quantize_avx2(coef_block, divisors, workspace);
   else
     jsimd_quantize_sse2(coef_block, divisors, workspace);
