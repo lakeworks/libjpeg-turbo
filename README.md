@@ -1,13 +1,13 @@
 Fork: lakeworks/libjpeg-turbo
 =============================
 
-This is a minimal fork of [libjpeg-turbo](https://github.com/libjpeg-turbo/libjpeg-turbo) **3.1.3** used by [lakeworks/php-builds](https://github.com/lakeworks/php-builds) — PGO-optimized PHP for Windows x64 with AVX-512.
+This is a minimal fork of [libjpeg-turbo](https://github.com/libjpeg-turbo/libjpeg-turbo) **3.1.4.1** used by [lakeworks/php-builds](https://github.com/lakeworks/php-builds) — PGO-optimized PHP for Windows x64 with AVX-512.
 
 ### Why this fork exists
 
 The official PHP Windows dependency server ([windows.php.net](https://windows.php.net)) has been frozen since December 2025 and ships **libjpeg-turbo 2.1.0** (May 2021). This fork keeps PHP builds on a current, security-patched version.
 
-### Security fixes since stock PHP deps (2.1.0 → 3.1.3)
+### Security fixes since stock PHP deps (2.1.0 → 3.1.4.1)
 
 | Version | Fix |
 |---------|-----|
@@ -19,7 +19,7 @@ The official PHP Windows dependency server ([windows.php.net](https://windows.ph
 
 ### Branch: `avx2-only`
 
-Active branch for PHP builds. Changes from upstream 3.1.3:
+Active branch for PHP builds. Changes from upstream 3.1.4.1:
 
 - **AVX-512 SIMD files removed** — benchmarks on AMD Zen 5 showed zero benefit over hand-tuned AVX2 NASM assembly. Reduces `.lib` size by ~260 KB.
 - **FORCEAVX2 dispatch fix** — SSE2 capability bit was missing when AVX2 was force-enabled, breaking tjbench SIMD mode comparison.
