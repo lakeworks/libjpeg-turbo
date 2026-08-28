@@ -5,9 +5,29 @@ This is a minimal fork of [libjpeg-turbo](https://github.com/libjpeg-turbo/libjp
 
 ### Why this fork exists
 
-The official PHP Windows dependency server ([windows.php.net](https://windows.php.net)) has been frozen since December 2025 and ships **libjpeg-turbo 2.1.0** (May 2021). This fork keeps PHP builds on a current, security-patched version.
+**Not version currency.** That was the original reason and it no longer holds. The
+official PHP Windows dependency server resumed publishing in 2026, and its stable
+manifests now pin libjpeg-turbo **3.1.4.1** for 8.3/vs16 and **3.2.0** for 8.4/vs17
+and 8.5/vs17. On 8.4 and 8.5 the official package is *ahead* of this fork.
 
-### Security fixes since stock PHP deps (2.1.0 → 3.1.4.1)
+**What differs is how the library is built.** The official packages are compiled with
+`/* #undef WITH_SIMD */` — no SIMD at all. Checked against the current stock package
+with `ar t`:
+
+| | archive members | SIMD objects |
+|---|---|---|
+| official `libjpeg-turbo-3.2.0-vs17-x64` | 101 | **0** |
+| this fork, as built for PHP | 129 | **28** (AVX2 + SSE2 NASM) |
+
+Official builds also compile no codec dependency with `/guard:cf`; this one carries
+control-flow guard.
+
+So the trade is explicit: a slightly older upstream version, against hand-tuned SIMD
+and CFG hardening that the stock package does not ship. **3.2.0 is deliberately not
+taken** — it reworks the SIMD dispatch layer this fork modifies, so adopting it is a
+rebase with real work in it rather than a version bump.
+
+### What upstream fixed on the way to 3.1.4.1
 
 | Version | Fix |
 |---------|-----|
@@ -27,7 +47,14 @@ Active branch for PHP builds. Changes from upstream 3.1.4.1:
 
 ### Performance note
 
-JPEG encode/decode performance is **flat** between stock PHP 8.3.27 (libjpeg-turbo 2.1.0) and custom PHP 8.3.30 (3.1.3). The hot paths are entirely in hand-tuned NASM assembly (AVX2 + SSE2), which is opaque to compiler flags, LTCG, and PGO. The primary value of this fork is **version currency and security**, not throughput.
+Measured against the 2021-era stock package (libjpeg-turbo 2.1.0), which still had
+SIMD, JPEG encode/decode throughput was **flat**: the hot paths are hand-tuned NASM,
+opaque to compiler flags, LTCG and PGO, so `/GL` and PGO buy nothing here.
+
+That comparison no longer describes the current choice. Today's stock package has no
+SIMD objects at all, so the meaningful comparison is SIMD against scalar C, and this
+fork's value is that SIMD plus `/guard:cf` — not throughput over a previous stock
+build, and no longer version currency.
 
 Direct tjbench results (800x800 q85): AVX2 521 Mpix/s, SSE2 420 Mpix/s (+25%), confirming SIMD dispatch is active.
 
